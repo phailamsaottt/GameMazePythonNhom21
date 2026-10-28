@@ -194,7 +194,7 @@ class MazeGenerator:
         goal = goal if goal and 0 <= goal[0] < rows and 0 <= goal[1] < cols else (rows - 2, cols - 2)
 
         # 1. Resolve Algorithm
-        algo_req = str(algorithm).lower()
+        algo_req = algorithm.value.lower() if isinstance(algorithm, Enum) else str(algorithm).lower()
         if algo_req in ("random", GenerationAlgorithm.RANDOM.value, "auto"):
             active_algo = self.rng.choice(self.AVAILABLE_ALGORITHMS)
         elif algo_req in ("dfs", "backtracker", GenerationAlgorithm.DFS.value):
@@ -275,7 +275,7 @@ class MazeGenerator:
         start = start or (1, 1)
         goal = goal or (rows - 2, cols - 2)
 
-        algo_req = str(algorithm).lower()
+        algo_req = algorithm.value.lower() if isinstance(algorithm, Enum) else str(algorithm).lower()
         if algo_req in ("random", GenerationAlgorithm.RANDOM.value, "auto"):
             active_algo = self.rng.choice(self.AVAILABLE_ALGORITHMS)
         elif algo_req in ("prims", "prim", GenerationAlgorithm.PRIMS.value):
