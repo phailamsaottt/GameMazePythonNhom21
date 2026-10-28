@@ -1,7 +1,7 @@
 from pathlib import Path
-import pygame
+import pygame 
 
-# 1.ĐƯỜNG DẪN HỆ THỐNG (PATHS)
+# PATHS
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -16,16 +16,16 @@ DB_PATH = BASE_DIR / "maze_game.db"
 
 
 
-# 2.CỬA SỔ HIỂN THỊ
+# CỬA SỔ HIỂN THỊ
 
 WINDOW_WIDTH  = 1280
 WINDOW_HEIGHT = 720
 FPS           = 60
-GAME_TITLE    = "Maze Game - BFS / DFS / A* Visualizer"
+GAME_TITLE    = "Maze Game"
 
 
 
-# 3.CẤU HÌNH MÊ CUNG & LƯỚI 
+# 3.CẤU HÌNH MÊ CUNG 
 
 CELL_SIZE = 24  
 
@@ -42,7 +42,7 @@ MAZE_PRESETS = {
 
 
 
-# 4. BẢNG MÃ MÀU RGB 
+# MÀU 
 
 
 COLOR_BG          = (30, 30, 40)       
@@ -66,7 +66,7 @@ COLOR_VISITED     = (180, 220, 180)
 
 
 
-# 5.TRẠNG THÁI GAME 
+# TRẠNG THÁI 
 
 STATE_MENU        = "STATE_MENU"
 STATE_SELECT_SIZE = "STATE_SELECT_SIZE"
@@ -76,7 +76,7 @@ STATE_RESULT      = "STATE_RESULT"
 
 
 
-# 6.CẤU HÌNH FONT VÀ ÂM THANH
+# CẤU HÌNH FONT VÀ ÂM THANH
 
 FONT_SIZE_SMALL  = 18
 FONT_SIZE_MEDIUM = 24
