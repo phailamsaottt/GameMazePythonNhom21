@@ -37,9 +37,9 @@ DEFAULT_COLS = 21
 
 
 MAZE_PRESETS = {
-    "Dễ (Small)": (15, 15),
-    "Trung bình (Medium)": (25, 25),
-    "Khó (Large)": (35, 35)
+    "Easy": (15, 15),
+    "Medium": (31, 31),
+    "Hard": (51, 51)
 }
 
 

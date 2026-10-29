@@ -183,9 +183,9 @@ class SolverPanel:
         draw_text(screen, self.spec.name, f.large, self.spec.color,
                   (self.rect.x + 14, self.rect.y + 4))
         if self.finished:
-            status = f"Hạng {self.rank}" if self.rank else "Về đích"
+            status = f"Rank {self.rank}" if self.rank else "Finished"
         else:
-            status = "Đang chạy..."
+            status = "Searching..."
         draw_text(screen, status, f.small, config.COLOR_TEXT,
                   (self.rect.right - 14, self.rect.y + 14), anchor="topright")
 
@@ -209,24 +209,24 @@ class SolverPanel:
 
         if self.final_stats is not None:
             nodes = self.final_stats.nodes_explored
-            frontier_label = "Biên tối đa"
+            frontier_label = "Max frontier"
             frontier = self.final_stats.max_frontier_size
             time_text = records.format_ms(self.final_stats.elapsed_time_ms)
         else:
             nodes = self.steps
-            frontier_label = "Biên hiện tại"
+            frontier_label = "Current frontier"
             frontier = len(self.last_step.frontier) if self.last_step is not None else 0
             time_text = "—"
         if self.finished and self.found and self.path:
-            path_text = f"{len(self.path)} ô"
+            path_text = f"{len(self.path)} cells"
         else:
             path_text = "—"
 
         lines = (
-            ("Node đã duyệt", records.format_int(nodes)),
+            ("Nodes explored", records.format_int(nodes)),
             (frontier_label, records.format_int(frontier)),
-            ("Độ dài đường đi", path_text),
-            ("Thời gian giải", time_text),
+            ("Path length", path_text),
+            ("Solve time", time_text),
         )
         for label, value in lines:
             draw_text(screen, label, f.small, config.COLOR_TEXT, (left, y))
@@ -382,7 +382,7 @@ class RaceScreen:
         try:
             self.race_id = database.save_race(m, self.results, self.winner, db_path=self.db_path)
         except Exception as exc:
-            print(f"[race] Không lưu được lịch sử: {exc}")
+            print(f"[race] Could not save history: {exc}")
             self.race_id = None
 
     def draw(self) -> None:
@@ -392,23 +392,23 @@ class RaceScreen:
 
         m = self.maze
         algo = records.ALGO_LABELS.get(str(m.algorithm).lower(), str(m.algorithm))
-        draw_text(screen, "Đua thuật toán: BFS vs DFS vs A*", f.medium, config.COLOR_TEXT, (self.GAP, 8))
+        draw_text(screen, "Algorithm Race: BFS vs DFS vs A*", f.medium, config.COLOR_TEXT, (self.GAP, 8))
         draw_text(
             screen,
-            f"Mê cung {m.rows}x{m.cols} · {algo} · braid {m.braid_factor:.2f} · seed {m.seed}",
+            f"Maze {m.rows}x{m.cols} · {algo} · braid {m.braid_factor:.2f} · seed {m.seed}",
             f.small, config.COLOR_TEXT, (self.GAP, 38),
         )
 
         right = screen.get_width() - self.GAP
         if self.finished:
-            msg = f"Người thắng: {self.winner}" if self.winner else "Không có đường đi"
+            msg = f"Winner: {self.winner}" if self.winner else "No path found"
             draw_text(screen, msg, f.medium, config.COLOR_PLAYER, (right, 8), anchor="topright")
-            draw_text(screen, "ENTER: xem kết quả · R: chạy lại · N: mê cung mới",
+            draw_text(screen, "ENTER: results · R: restart · N: new maze",
                       f.small, config.COLOR_TEXT, (right, 38), anchor="topright")
         else:
-            state = "TẠM DỪNG" if self.paused else f"Tốc độ x{self.speed}"
+            state = "PAUSED" if self.paused else f"Speed x{self.speed}"
             draw_text(screen, state, f.medium, config.COLOR_PLAYER, (right, 8), anchor="topright")
-            draw_text(screen, "SPACE: dừng · ←/→: tốc độ · R: lại · N: mới · ESC: menu",
+            draw_text(screen, "SPACE: pause · ←/→: speed · R: restart · N: new · ESC: menu",
                       f.small, config.COLOR_TEXT, (right, 38), anchor="topright")
 
         for panel in self.panels:

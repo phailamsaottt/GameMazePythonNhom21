@@ -109,7 +109,7 @@ def save_race(
 ) -> str:
     results = list(results)
     if not results:
-        raise ValueError("save_race() cần ít nhất một kết quả solver")
+        raise ValueError("save_race() requires at least one solver result")
 
     race_id = uuid.uuid4().hex
     played_at = _now()

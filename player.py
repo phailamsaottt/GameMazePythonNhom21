@@ -324,7 +324,12 @@ class Player(pygame.sprite.Sprite):
 			if not frames:
 				return
 		if self._is_gif(frames[0]):
-			self.image = self._animation_surface(frames[0])
+			current_frame = self._animation_surface(frames[0])
+			self.image = (
+				pygame.transform.flip(current_frame, True, False)
+				if not self.facing_right or self.flip
+				else current_frame
+			)
 			self.rect = self.image.get_rect(center=(round(self.x), round(self.y)))
 			return
 
@@ -444,20 +449,19 @@ class Player(pygame.sprite.Sprite):
 			animation = frames[0]
 			center = (round(self.x + offset_x), round(self.y + offset_y))
 			frame = animation.current_surface
-			if visual_scale == 1.0:
-				draw_rect = frame.get_rect(center=center)
-				animation.render(surface, draw_rect.topleft)
-			else:
-				# Let gif_pygame advance its animation, then scale the rendered
-				# frame with the map so it remains visible at large maze sizes.
-				frame_surface = pygame.Surface(frame.get_size(), pygame.SRCALPHA)
-				animation.render(frame_surface, (0, 0))
+			# Render to a temporary surface so GIF animation advances and can be
+			# flipped/scaled before being placed on screen.
+			frame_surface = pygame.Surface(frame.get_size(), pygame.SRCALPHA)
+			animation.render(frame_surface, (0, 0))
+			if not self.facing_right or self.flip:
+				frame_surface = pygame.transform.flip(frame_surface, True, False)
+			if visual_scale != 1.0:
 				scaled_size = (
 					max(1, round(frame_surface.get_width() * visual_scale)),
 					max(1, round(frame_surface.get_height() * visual_scale)),
 				)
 				frame_surface = pygame.transform.scale(frame_surface, scaled_size)
-				surface.blit(frame_surface, frame_surface.get_rect(center=center))
+			surface.blit(frame_surface, frame_surface.get_rect(center=center))
 			return
 		if hasattr(self, "image") and self.image is not None:
 			image = self.image

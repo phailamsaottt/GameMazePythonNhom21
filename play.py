@@ -699,7 +699,7 @@ class PlayingScreen:
         )
         hovered = self.find_path_button_rect.collidepoint(pygame.mouse.get_pos())
         fill = (30, 105, 86) if not hovered else (42, 145, 112)
-        label = "TÌM ĐƯỜNG ĐI (F)"
+        label = "FIND PATH (F)"
         pygame.draw.rect(target, fill, self.find_path_button_rect, border_radius=6)
         pygame.draw.rect(
             target,

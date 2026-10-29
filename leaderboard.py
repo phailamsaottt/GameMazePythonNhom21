@@ -30,7 +30,7 @@ class LeaderboardScreen:
 
     DIFFICULTIES = {
         "Easy": (15, 15),
-        "Normal": (31, 31),
+        "Medium": (31, 31),
         "Hard": (51, 51),
     }
     COLORS = {
@@ -200,14 +200,14 @@ class LeaderboardScreen:
         mouse_pos = pygame.mouse.get_pos()
         active_colors = {
             "Easy": (31, 166, 153),
-            "Normal": (111, 84, 196),
+            "Medium": (111, 84, 196),
             "Hard": self.COLORS["red"],
         }
         for name, rect in self.tab_rects.items():
             selected = name == self.selected_difficulty
             hovered = rect.collidepoint(mouse_pos)
             if selected:
-                color = active_colors[name]
+                color = active_colors.get(name, (62, 81, 105))
             elif hovered:
                 color = (62, 81, 105)
             else:
@@ -228,7 +228,7 @@ class LeaderboardScreen:
     def _mode_color(self, mode: str) -> tuple[int, int, int]:
         if mode == "HARD":
             return self.COLORS["red"]
-        if mode == "NORMAL":
+        if mode == "MEDIUM":
             return (111, 84, 196)
         return (31, 145, 137)
 
@@ -256,7 +256,7 @@ class LeaderboardScreen:
         rank_text = self.header_font.render(str(rank) if rank > 0 else "—", True, (18, 25, 35))
         target.blit(rank_text, rank_text.get_rect(center=rank_center))
 
-        player_name = "Bạn" if user_row else str(row.get("player_name") or "Người chơi")
+        player_name = "You" if user_row else str(row.get("player_name") or "Player")
         player_text = self.body_font.render(player_name, True, self.COLORS["text"])
         target.blit(player_text, (rect.x + 78, rect.centery - player_text.get_height() // 2))
 
@@ -294,10 +294,10 @@ class LeaderboardScreen:
 
         header_color = self.COLORS["muted"]
         headers = (
-            ("Hạng", table_left + 18),
-            ("Người chơi", table_left + 78),
-            ("Thời gian", table_left + int(table_width * 0.61)),
-            ("Chế độ", table_left + int(table_width * 0.82)),
+            ("Rank", table_left + 18),
+            ("Player", table_left + 78),
+            ("Time", table_left + int(table_width * 0.61)),
+            ("Mode", table_left + int(table_width * 0.82)),
         )
         for label, x in headers:
             text = self.header_font.render(label.upper(), True, header_color)
@@ -314,7 +314,7 @@ class LeaderboardScreen:
 
         if not self.top_rows:
             empty = self.body_font.render(
-                "Chưa có thành tích ở độ khó này", True, self.COLORS["muted"]
+                "No scores for this difficulty yet", True, self.COLORS["muted"]
             )
             target.blit(
                 empty,
@@ -344,10 +344,10 @@ class LeaderboardScreen:
             pygame.draw.circle(target, self.COLORS["cyan"], rank_center, 16)
             dash = self.header_font.render("—", True, (18, 25, 35))
             target.blit(dash, dash.get_rect(center=rank_center))
-            you_text = self.body_font.render("Bạn", True, self.COLORS["text"])
+            you_text = self.body_font.render("You", True, self.COLORS["text"])
             target.blit(you_text, (user_rect.x + 78, user_rect.centery - you_text.get_height() // 2))
             note = self.small_font.render(
-                "Chưa có thành tích ở độ khó này", True, self.COLORS["cyan"]
+                "No scores for this difficulty yet", True, self.COLORS["cyan"]
             )
             target.blit(
                 note,
@@ -358,9 +358,9 @@ class LeaderboardScreen:
         back_fill = (61, 79, 102) if self.back_rect.collidepoint(mouse_pos) else (39, 52, 71)
         pygame.draw.rect(target, back_fill, self.back_rect, border_radius=12)
         pygame.draw.rect(target, self.COLORS["cyan"], self.back_rect, width=2, border_radius=12)
-        back_text = self.body_font.render("Quay lại", True, self.COLORS["text"])
+        back_text = self.body_font.render("Back", True, self.COLORS["text"])
         target.blit(back_text, back_text.get_rect(center=self.back_rect.center))
 
         if self.load_error:
-            error = self.small_font.render("Không tải được dữ liệu bảng xếp hạng", True, self.COLORS["red"])
+            error = self.small_font.render("Could not load leaderboard data", True, self.COLORS["red"])
             target.blit(error, error.get_rect(center=(width // 2, height - 92)))

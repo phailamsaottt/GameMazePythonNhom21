@@ -79,6 +79,12 @@ class Button:
         base_image: pygame.Surface | None = None,
         hover_image: pygame.Surface | None = None,
         target_state: str | None = None,
+        color_theme: tuple[
+            tuple[int, int, int],
+            tuple[int, int, int],
+            tuple[int, int, int],
+            tuple[int, int, int],
+        ] | None = None,
     ) -> None:
         self.x = int(x)
         self.y = int(y)
@@ -87,6 +93,7 @@ class Button:
         self.text = text
         self.font = font
         self.target_state = target_state
+        self.color_theme = color_theme
 
         self.rect = pygame.Rect(self.x, self.y, self.width, self.height)
         self.is_hovered: bool = False
@@ -135,7 +142,19 @@ class Button:
     def draw(self, surface: pygame.Surface) -> None:
         """Vẽ button lên surface với hiệu ứng gỗ retro và text căn giữa hoàn hảo."""
         # 1. Vẽ nền button (Sprite hoặc fallback Rect)
-        if self.base_image is not None:
+        if self.color_theme is not None:
+            base_color, hover_color, border_color, _text_color = self.color_theme
+            fill = hover_color if self.is_hovered else base_color
+            pygame.draw.rect(surface, fill, self.rect, border_radius=12)
+            pygame.draw.rect(surface, border_color, self.rect, width=3, border_radius=12)
+            pygame.draw.line(
+                surface,
+                tuple(min(255, channel + 28) for channel in fill),
+                (self.rect.left + 12, self.rect.top + 5),
+                (self.rect.right - 12, self.rect.top + 5),
+                2,
+            )
+        elif self.base_image is not None:
             if self.is_hovered and self.hover_image is not None:
                 surface.blit(self.hover_image, self.rect)
             else:
@@ -186,7 +205,10 @@ class Button:
             )
 
         # 2. Render text căn giữa hoàn hảo
-        text_color = (255, 235, 180) if self.is_hovered else (245, 245, 245)
+        if self.color_theme is not None:
+            text_color = self.color_theme[3]
+        else:
+            text_color = (255, 235, 180) if self.is_hovered else (245, 245, 245)
 
         # Đổ bóng chữ tạo độ sâu pixel-art
         shadow_surface = self.font.render(self.text, True, (40, 25, 15))
@@ -353,7 +375,7 @@ class MenuScreen:
 
     def _draw_footer(self, surface: pygame.Surface) -> None:
       
-        tip_text = "Dùng chuột để chọn hoặc nhấn ESC để thoát"
+        tip_text = "Click to choose or press ESC to exit"
         tip_surf = self.font.render(tip_text, True, (130, 130, 150))
         tip_rect = tip_surf.get_rect(center=(config.WINDOW_WIDTH // 2, config.WINDOW_HEIGHT - 40))
         surface.blit(tip_surf, tip_rect)
@@ -366,6 +388,11 @@ class SelectSizeScreen:
         ("EASY (15x15)", (15, 15)),
         ("MEDIUM (31x31)", (31, 31)),
         ("HARD (51x51)", (51, 51)),
+    )
+    DIFFICULTY_THEMES = (
+        ((39, 137, 78), (52, 165, 96), (143, 225, 154), (255, 255, 255)),
+        ((202, 151, 34), (230, 177, 45), (255, 228, 126), (40, 34, 18)),
+        ((170, 49, 57), (210, 62, 68), (255, 145, 145), (255, 255, 255)),
     )
 
     def __init__(self, screen: pygame.Surface) -> None:
@@ -393,7 +420,7 @@ class SelectSizeScreen:
                 height=button_height,
                 text=label,
                 font=self.font,
-                base_image=self.button_image,
+                color_theme=self.DIFFICULTY_THEMES[index],
                 target_state=config.STATE_SOLO_SETUP,
             )
             self.buttons.append(button)

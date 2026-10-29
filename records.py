@@ -134,10 +134,10 @@ def _solver_row(r: dict[str, Any]) -> SolverRow:
         elapsed_ms=r["elapsed_ms"],
         max_frontier=r["max_frontier"],
         nodes_text=format_int(r["nodes_explored"]),
-        path_text=f"{r['path_length']} ô" if found else "—",
+        path_text=f"{r['path_length']} cells" if found else "—",
         time_text=format_ms(r["elapsed_ms"]),
         frontier_text=format_int(r["max_frontier"]),
-        status_text="THẮNG" if winner else ("Hoàn thành" if found else "Không có đường"),
+        status_text="WINNER" if winner else ("Completed" if found else "No path"),
     )
 
 
@@ -148,21 +148,21 @@ def _names(rows: list[dict[str, Any]], key: str, best: float) -> str:
 def _build_insights(rows: list[dict[str, Any]]) -> list[str]:
     ok = [r for r in rows if r["found"]]
     if not ok:
-        return ["Không thuật toán nào tìm được đường đi."]
+        return ["No algorithm found a path."]
 
     best_nodes = min(r["nodes_explored"] for r in ok)
     best_path = min(r["path_length"] for r in ok)
     best_time = min(r["elapsed_ms"] for r in ok)
 
     out = [
-        f"Duyệt ít node nhất: {_names(ok, 'nodes_explored', best_nodes)} ({format_int(best_nodes)} node)",
-        f"Đường đi ngắn nhất: {_names(ok, 'path_length', best_path)} ({best_path} ô)",
-        f"Giải nhanh nhất: {_names(ok, 'elapsed_ms', best_time)} ({format_ms(best_time)})",
+        f"Fewest nodes explored: {_names(ok, 'nodes_explored', best_nodes)} ({format_int(best_nodes)} nodes)",
+        f"Shortest path: {_names(ok, 'path_length', best_path)} ({best_path} cells)",
+        f"Fastest solve: {_names(ok, 'elapsed_ms', best_time)} ({format_ms(best_time)})",
     ]
     for r in ok:
         diff = r["path_length"] - best_path
         if diff > 0:
-            out.append(f"{r['solver']} đi dài hơn đường tối ưu {diff} ô")
+            out.append(f"{r['solver']} path was {diff} cells longer than optimal")
     return out
 
 
@@ -260,15 +260,15 @@ def get_history_table(limit: int = 10, db_path: DbPath = None) -> list[HistoryEn
             continue
         first = rows[0]
         if first["mode"] == MODE_PLAY:
-            status = "Hoàn thành" if first["found"] else "Bỏ dở"
+            status = "Completed" if first["found"] else "Incomplete"
             entries.append(
                 HistoryEntry(
                     race_id=race_id,
                     date_text=format_datetime(first["played_at"]),
-                    mode_text="Tự chơi",
+                    mode_text="Solo Play",
                     maze_text=format_maze(first),
                     winner_text=status,
-                    summary_text=f"{first['path_length']} bước · {format_ms(first['elapsed_ms'])}",
+                    summary_text=f"{first['path_length']} steps · {format_ms(first['elapsed_ms'])}",
                 )
             )
         else:
@@ -277,11 +277,11 @@ def get_history_table(limit: int = 10, db_path: DbPath = None) -> list[HistoryEn
                 HistoryEntry(
                     race_id=race_id,
                     date_text=format_datetime(first["played_at"]),
-                    mode_text="Đua thuật toán",
+                    mode_text="Algorithm Race",
                     maze_text=format_maze(first),
                     winner_text=win["solver"] if win else "—",
                     summary_text=(
-                        f"{win['path_length']} ô · {format_int(win['nodes_explored'])} node"
+                        f"{win['path_length']} cells · {format_int(win['nodes_explored'])} nodes"
                         if win else "—"
                     ),
                 )

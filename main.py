@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 import pygame
 import config
 
@@ -6,6 +7,39 @@ from menu import MenuScreen, NameInputScreen, SelectSizeScreen, SoloSetupScreen
 from race import TwoPlayerScreen
 from play import PlayingScreen
 from leaderboard import LeaderboardScreen
+
+
+def _start_background_music() -> None:
+    """Start the gameplay loop without interrupting menu or effect sounds."""
+    if not pygame.mixer.get_init():
+        try:
+            pygame.mixer.init()
+        except pygame.error:
+            return
+
+    candidates = (
+        Path(config.SOUNDS_DIR) / "background.mp3",
+        Path(config.BASE_DIR) / "assets" / "sounds" / "background.mp3",
+    )
+    music_path = next((path for path in candidates if path.is_file()), None)
+    if music_path is None:
+        return
+
+    try:
+        pygame.mixer.music.stop()
+        pygame.mixer.music.load(str(music_path))
+        pygame.mixer.music.set_volume(getattr(config, "DEFAULT_VOLUME", 0.5))
+        pygame.mixer.music.play(-1)
+    except pygame.error:
+        pass
+
+
+def _stop_background_music() -> None:
+    if pygame.mixer.get_init():
+        try:
+            pygame.mixer.music.stop()
+        except pygame.error:
+            pass
 
 
 def main() -> None:
@@ -74,6 +108,7 @@ def main() -> None:
                         player_name=solo_setup_screen.selected_name,
                         character_id=solo_setup_screen.selected_character_id,
                     )
+                    _start_background_music()
                     current_state = config.STATE_PLAYING
                 elif next_state:
                     current_state = next_state
@@ -86,6 +121,7 @@ def main() -> None:
                         player1_name=names[0],
                         player2_name=names[1],
                     )
+                    _start_background_music()
                     current_state = config.STATE_RACE
                 elif next_state:
                     current_state = next_state
@@ -95,6 +131,8 @@ def main() -> None:
                     continue
                 next_state = two_player_screen.handle_event(event)
                 if next_state:
+                    if next_state != config.STATE_RACE:
+                        _stop_background_music()
                     current_state = next_state
             elif current_state == config.STATE_PLAYING:
                 if play_screen is None:
@@ -102,6 +140,8 @@ def main() -> None:
                     continue
                 next_state = play_screen.handle_event(event)
                 if next_state:
+                    if next_state != config.STATE_PLAYING:
+                        _stop_background_music()
                     current_state = next_state
             elif current_state == config.STATE_RESULT:
                 next_state = leaderboard_screen.handle_event(event)
