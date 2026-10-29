@@ -8,6 +8,11 @@ from typing import Any
 import pygame
 
 try:
+	import gif_pygame
+except ImportError:  # GIF support is optional; sprite-sheet animation still works.
+	gif_pygame = None
+
+try:
 	import config
 except ImportError:
 	from . import config  # type: ignore[no-redef]
@@ -67,7 +72,7 @@ def load_character_frames(character_dir: Path | str | None = None) -> dict[str, 
 
 
 class Player(pygame.sprite.Sprite):
-	"""Nhân vật người chơi hỗ trợ di chuyển mượt mà, va chạm tường và hệ thống animation."""
+
 
 	DIRECTIONS = ("UP", "DOWN", "LEFT", "RIGHT")
 
@@ -78,18 +83,35 @@ class Player(pygame.sprite.Sprite):
 		speed: float = 3.0,
 		player_size: int | None = None,
 		animation_speed: float = 0.15,
+		controls: str = "wasd",
+		character_id: int = 1,
+		spawn_offset: tuple[float, float] = (0.0, 0.0),
 	) -> None:
 		super().__init__()
+		if controls not in ("wasd", "arrows"):
+			raise ValueError("controls must be 'wasd' or 'arrows'")
+		if character_id not in (1, 2):
+			raise ValueError("character_id must be 1 or 2")
+		self.controls = controls
+		self.character_id = character_id
+		self.use_gif = bool(character_id == 2 and gif_pygame is not None)
+		self.spawn_offset = (float(spawn_offset[0]), float(spawn_offset[1]))
 		self.speed = float(speed)
-		self.player_size = int(player_size or CELL_SIZE * 0.72)
+		# Keep the sprite close to a full maze tile while using a smaller AABB
+		# for collision checks, so the larger art does not snag on wall corners.
+		default_visual_scale = 1.6 if character_id == 2 else 0.95
+		self.visual_size = max(1, int(player_size or CELL_SIZE * default_visual_scale))
+		self.hitbox_size = max(1, int(CELL_SIZE * 0.65))
+		# Compatibility for callers that still inspect the old attribute.
+		self.player_size = self.visual_size
 
 		# Tọa độ và hướng
 		self.direction = "DOWN"
 		self.is_moving = False
-		self.facing_right = True  # Hướng mặt hiện tại (True: phải, False: trái)
+		self.facing_right = True  
 		self.flip = False         # Cờ lật sprite khi quay sang trái
 
-		# Quản lý trạng thái (State) và Animation
+		# Animation
 		self.state = "idle"       # Trạng thái mặc định là 'idle'
 		self.frame_index = 0.0    # Vị trí frame hiện tại
 		self.animation_speed = float(animation_speed)  # Tốc độ chuyển frame
@@ -129,26 +151,91 @@ class Player(pygame.sprite.Sprite):
 	def anim_index(self, value: int | float) -> None:
 		self.frame_index = float(value)
 
-	def load_animations(self) -> dict[str, list[pygame.Surface]]:
+	def load_animations(self) -> dict[str, list[Any]]:
 		"""Tải tất cả các hình ảnh từ Assets/images/Character/idle và Assets/images/Character/run."""
-		animations = load_character_frames()
+		if self.use_gif:
+			character_dir = Path(config.BASE_DIR) / "Assets" / "images" / "Character"
+			gif_animations: dict[str, list[Any]] = {"idle": [], "run": []}
+			for state, filename in (("idle", "Idle_2.gif"), ("run", "Run_2.gif")):
+				gif_path = character_dir / filename
+				try:
+					if gif_path.is_file():
+						gif = gif_pygame.load(str(gif_path))
+						# These GIFs have large transparent margins. Crop to the
+						# animated character before scaling, or the character itself
+						# remains tiny even when the GIF canvas fills the tile.
+						frames = [frame for frame, _duration in gif.frames]
+						bounds = self._union_visible_bounds(frames)
+						cropped_frames = []
+						for frame, duration in gif.frames:
+							crop = bounds.clip(frame.get_rect())
+							visible = frame.subsurface(crop).copy() if crop.w and crop.h else frame
+							cropped_frames.append((self._scale_surface_to_tile(visible), duration))
+						gif = gif_pygame.GIFPygame(cropped_frames, loops=gif.loops[1])
+						gif_animations[state].append(gif)
+				except Exception:
+					pass
+			return gif_animations
+
+		animations: dict[str, list[Any]] = load_character_frames()
+		for state, frames in animations.items():
+			animations[state] = self._fit_animation_frames(frames)
 
 		# Dự phòng nếu không tìm thấy ảnh
 		for state, color in (("idle", (40, 120, 230)), ("run", (230, 120, 40))):
 			if not animations.get(state):
-				fallback = pygame.Surface((self.player_size, self.player_size), pygame.SRCALPHA)
+				fallback = pygame.Surface((self.visual_size, self.visual_size), pygame.SRCALPHA)
 				fallback.fill(color)
 				animations.setdefault(state, []).append(fallback)
 
 		return animations
 
+	@staticmethod
+	def _union_visible_bounds(frames: Sequence[pygame.Surface]) -> pygame.Rect:
+		"""Return one alpha-aware crop shared by every frame of an animation."""
+		bounds = [frame.get_bounding_rect(min_alpha=1) for frame in frames]
+		bounds = [rect for rect in bounds if rect.width and rect.height]
+		if not bounds:
+			return frames[0].get_rect()
+		return bounds[0].unionall(bounds[1:])
+
+	def _fit_surface(self, surface: pygame.Surface) -> pygame.Surface:
+		"""Scale the visible sprite (not its transparent padding) to a tile."""
+		visible_bounds = surface.get_bounding_rect(min_alpha=1)
+		if visible_bounds.width and visible_bounds.height:
+			surface = surface.subsurface(visible_bounds).copy()
+		return self._scale_surface_to_tile(surface)
+
+	def _scale_surface_to_tile(self, surface: pygame.Surface) -> pygame.Surface:
+		"""Scale a tightly cropped character while preserving its aspect ratio."""
+		width, height = surface.get_size()
+		if width <= 0 or height <= 0:
+			return pygame.Surface((self.visual_size, self.visual_size), pygame.SRCALPHA)
+		scale = self.visual_size / max(width, height)
+		target_size = (max(1, round(width * scale)), max(1, round(height * scale)))
+		return pygame.transform.scale(surface, target_size)
+
+	def _fit_animation_frames(
+		self, frames: Sequence[pygame.Surface]
+	) -> list[pygame.Surface]:
+		"""Crop a shared transparent border and scale each frame to tile height."""
+		if not frames:
+			return []
+		bounds = self._union_visible_bounds(frames)
+		result = []
+		for frame in frames:
+			crop = bounds.clip(frame.get_rect())
+			visible = frame.subsurface(crop).copy() if crop.width and crop.height else frame
+			result.append(self._scale_surface_to_tile(visible))
+		return result
+
 	def _init_first_frame(self) -> None:
 		"""Khởi tạo frame ảnh đầu tiên cho Player."""
 		frames = self.animations.get(self.state) or self.animations.get("idle")
 		if frames:
-			self.image = frames[0]
+			self.image = self._animation_surface(frames[0])
 		else:
-			self.image = pygame.Surface((self.player_size, self.player_size), pygame.SRCALPHA)
+			self.image = pygame.Surface((self.visual_size, self.visual_size), pygame.SRCALPHA)
 			self.image.fill((40, 120, 230))
 		self.rect = self.image.get_rect()
 
@@ -158,6 +245,8 @@ class Player(pygame.sprite.Sprite):
 		self.grid_y = int(start_grid_y)
 		self.x = (self.grid_x + 0.5) * CELL_SIZE
 		self.y = (self.grid_y + 0.5) * CELL_SIZE
+		self.x += self.spawn_offset[0]
+		self.y += self.spawn_offset[1]
 		self.is_moving = False
 		self.state = "idle"
 		self.frame_index = 0.0
@@ -181,10 +270,16 @@ class Player(pygame.sprite.Sprite):
 		dx = 0.0
 		dy = 0.0
 
-		is_left = bool(keys[pygame.K_LEFT] or keys[pygame.K_a])
-		is_right = bool(keys[pygame.K_RIGHT] or keys[pygame.K_d])
-		is_up = bool(keys[pygame.K_UP] or keys[pygame.K_w])
-		is_down = bool(keys[pygame.K_DOWN] or keys[pygame.K_s])
+		if self.controls == "wasd":
+			is_left = bool(keys[pygame.K_a])
+			is_right = bool(keys[pygame.K_d])
+			is_up = bool(keys[pygame.K_w])
+			is_down = bool(keys[pygame.K_s])
+		else:
+			is_left = bool(keys[pygame.K_LEFT])
+			is_right = bool(keys[pygame.K_RIGHT])
+			is_up = bool(keys[pygame.K_UP])
+			is_down = bool(keys[pygame.K_DOWN])
 
 		# Xử lý di chuyển ngang & hướng mặt
 		if is_left and not is_right:
@@ -228,6 +323,10 @@ class Player(pygame.sprite.Sprite):
 			frames = self.animations.get("idle", [])
 			if not frames:
 				return
+		if self._is_gif(frames[0]):
+			self.image = self._animation_surface(frames[0])
+			self.rect = self.image.get_rect(center=(round(self.x), round(self.y)))
+			return
 
 		# Tự động tăng frame_index theo animation_speed
 		self.frame_index += self.animation_speed
@@ -247,6 +346,14 @@ class Player(pygame.sprite.Sprite):
 		# Giữ tâm rect tại vị trí (x, y) của nhân vật
 		self.rect = self.image.get_rect(center=(round(self.x), round(self.y)))
 
+	@staticmethod
+	def _is_gif(animation: Any) -> bool:
+		return gif_pygame is not None and isinstance(animation, gif_pygame.GIFPygame)
+
+	@staticmethod
+	def _animation_surface(animation: Any) -> pygame.Surface:
+		return animation.current_surface if Player._is_gif(animation) else animation
+
 	def check_collision(
 		self,
 		next_x: float,
@@ -256,7 +363,9 @@ class Player(pygame.sprite.Sprite):
 		"""Kiểm tra xem AABB của player có va chạm tường hoặc vượt ngoài mê cung hay không."""
 		if maze_matrix is None or not maze_matrix or not maze_matrix[0]:
 			return False
-		half = self.player_size / 2
+		# A slightly inset collision box prevents the visible sprite corners from
+		# catching on wall corners while the sprite still keeps its full size.
+		half = self.hitbox_size / 2
 		left = math.floor((next_x - half) / CELL_SIZE)
 		right = math.floor((next_x + half - 1e-6) / CELL_SIZE)
 		top = math.floor((next_y - half) / CELL_SIZE)
@@ -292,16 +401,28 @@ class Player(pygame.sprite.Sprite):
 
 			distance = self.speed * (max(0.0, dt) * 60 if dt is not None else 1.0)
 			move_x, move_y = dx * distance, dy * distance
-			steps = max(1, math.ceil(max(abs(move_x), abs(move_y)) / max(1, self.player_size / 2)))
-			step_x, step_y = move_x / steps, move_y / steps
+			max_substep = max(1.0, self.hitbox_size * 0.25)
+			steps_x = max(1, math.ceil(abs(move_x) / max_substep))
+			steps_y = max(1, math.ceil(abs(move_y) / max_substep))
+			step_x = move_x / steps_x
+			step_y = move_y / steps_y
 
-			for _ in range(steps):
-				candidate_x = self.x + step_x
-				if not self.check_collision(candidate_x, self.y, maze_matrix):
-					self.x = candidate_x
-				candidate_y = self.y + step_y
-				if not self.check_collision(self.x, candidate_y, maze_matrix):
-					self.y = candidate_y
+			# Resolve the complete X movement before attempting Y. Small substeps
+			# avoid tunnelling during a slow frame; a blocked axis is rolled back
+			# while the other axis can still slide along the wall.
+			for _ in range(steps_x):
+				previous_x = self.x
+				self.x += step_x
+				if self.check_collision(self.x, self.y, maze_matrix):
+					self.x = previous_x
+					break
+
+			for _ in range(steps_y):
+				previous_y = self.y
+				self.y += step_y
+				if self.check_collision(self.x, self.y, maze_matrix):
+					self.y = previous_y
+					break
 
 			self.grid_x = int(self.x // CELL_SIZE)
 			self.grid_y = int(self.y // CELL_SIZE)
@@ -309,12 +430,46 @@ class Player(pygame.sprite.Sprite):
 		# Cập nhật animation khung hình tiếp theo
 		self.animate()
 
-	def draw(self, surface: pygame.Surface, offset_x: float = 0, offset_y: float = 0) -> None:
+	def draw(
+		self,
+		surface: pygame.Surface,
+		offset_x: float = 0,
+		offset_y: float = 0,
+		visual_scale: float = 1.0,
+	) -> None:
 		"""Vẽ frame hiện tại ở tâm vị trí player với camera offsets."""
+		visual_scale = max(0.01, float(visual_scale))
+		frames = self.animations.get(self.state) or self.animations.get("idle", [])
+		if frames and self._is_gif(frames[0]):
+			animation = frames[0]
+			center = (round(self.x + offset_x), round(self.y + offset_y))
+			frame = animation.current_surface
+			if visual_scale == 1.0:
+				draw_rect = frame.get_rect(center=center)
+				animation.render(surface, draw_rect.topleft)
+			else:
+				# Let gif_pygame advance its animation, then scale the rendered
+				# frame with the map so it remains visible at large maze sizes.
+				frame_surface = pygame.Surface(frame.get_size(), pygame.SRCALPHA)
+				animation.render(frame_surface, (0, 0))
+				scaled_size = (
+					max(1, round(frame_surface.get_width() * visual_scale)),
+					max(1, round(frame_surface.get_height() * visual_scale)),
+				)
+				frame_surface = pygame.transform.scale(frame_surface, scaled_size)
+				surface.blit(frame_surface, frame_surface.get_rect(center=center))
+			return
 		if hasattr(self, "image") and self.image is not None:
-			draw_rect = self.image.get_rect(center=(round(self.x + offset_x), round(self.y + offset_y)))
-			surface.blit(self.image, draw_rect)
+			image = self.image
+			if visual_scale != 1.0:
+				scaled_size = (
+					max(1, round(image.get_width() * visual_scale)),
+					max(1, round(image.get_height() * visual_scale)),
+				)
+				image = pygame.transform.scale(image, scaled_size)
+			draw_rect = image.get_rect(center=(round(self.x + offset_x), round(self.y + offset_y)))
+			surface.blit(image, draw_rect)
 		else:
-			rect = pygame.Rect(0, 0, self.player_size, self.player_size)
+			rect = pygame.Rect(0, 0, self.visual_size, self.visual_size)
 			rect.center = (round(self.x + offset_x), round(self.y + offset_y))
-			pygame.draw.rect(surface, (40, 120, 230), rect, border_radius=max(1, self.player_size // 6))
+			pygame.draw.rect(surface, (40, 120, 230), rect, border_radius=max(1, self.visual_size // 6))

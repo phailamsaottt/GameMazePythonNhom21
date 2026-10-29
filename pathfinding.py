@@ -128,9 +128,8 @@ def get_neighbors(
     return valid
 
 
-# -----------------------------------------------------------------------------
-# 1. Breadth-First Search (BFS) Generator
-# -----------------------------------------------------------------------------
+# 1. Breadth-First Search (BFS) 
+
 def bfs(
     grid: list[list[int]],
     start: tuple[int, int],

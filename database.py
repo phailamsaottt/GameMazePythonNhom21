@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS play_history (
     path_length     INTEGER NOT NULL DEFAULT 0,
     elapsed_ms      REAL    NOT NULL DEFAULT 0,
     max_frontier    INTEGER NOT NULL DEFAULT 0,
-    is_winner       INTEGER NOT NULL DEFAULT 0
+    is_winner       INTEGER NOT NULL DEFAULT 0,
+    player_name     TEXT    NOT NULL DEFAULT 'PLAYER'
 );
 CREATE INDEX IF NOT EXISTS idx_history_race ON play_history(race_id);
 CREATE INDEX IF NOT EXISTS idx_history_mode ON play_history(mode);
@@ -45,6 +46,10 @@ _COLUMNS = (
 _INSERT_SQL = (
     f"INSERT INTO play_history ({', '.join(_COLUMNS)}) "
     f"VALUES ({', '.join('?' for _ in _COLUMNS)})"
+)
+_INSERT_PLAY_SQL = (
+    f"INSERT INTO play_history ({', '.join((*_COLUMNS, 'player_name'))}) "
+    f"VALUES ({', '.join('?' for _ in range(len(_COLUMNS) + 1))})"
 )
 
 
@@ -63,6 +68,11 @@ def get_connection(db_path: str | Path | None = None) -> Iterator[sqlite3.Connec
     conn.row_factory = sqlite3.Row
     try:
         conn.executescript(SCHEMA)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(play_history)")}
+        if "player_name" not in columns:
+            conn.execute(
+                "ALTER TABLE play_history ADD COLUMN player_name TEXT NOT NULL DEFAULT 'PLAYER'"
+            )
         yield conn
         conn.commit()
     except Exception:
@@ -129,14 +139,16 @@ def save_play(
     elapsed_ms: float,
     completed: bool = True,
     db_path: str | Path | None = None,
+    player_name: str = PLAYER_NAME,
 ) -> str:
     race_id = uuid.uuid4().hex
     row = (
         race_id, _now(), MODE_PLAY, *_maze_fields(maze),
         PLAYER_NAME, 1 if completed else 0, 0, int(steps), float(elapsed_ms), 0, 0,
+        str(player_name).strip() or PLAYER_NAME,
     )
     with get_connection(db_path) as conn:
-        conn.execute(_INSERT_SQL, row)
+        conn.execute(_INSERT_PLAY_SQL, row)
     return race_id
 
 

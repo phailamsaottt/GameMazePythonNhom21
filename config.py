@@ -6,10 +6,12 @@ import pygame
 BASE_DIR = Path(__file__).resolve().parent
 
 
-ASSETS_DIR = BASE_DIR / "assets"
+ASSETS_DIR = BASE_DIR / "Assets"
 IMAGES_DIR = ASSETS_DIR / "images"
 SOUNDS_DIR = ASSETS_DIR / "sounds"
-FONTS_DIR  = ASSETS_DIR / "fonts"
+FONTS_DIR  = ASSETS_DIR / "Fonts"
+FONT_ROBOTO_PATH = FONTS_DIR / "Roboto-Italic-VariableFont_wdth,wght.ttf"
+FONT_JIM_NIGHTSHADE_PATH = FONTS_DIR / "JimNightshade-Regular.ttf"
 
 
 DB_PATH = BASE_DIR / "maze_game.db"
@@ -70,9 +72,11 @@ COLOR_VISITED     = (180, 220, 180)
 
 STATE_MENU        = "STATE_MENU"
 STATE_SELECT_SIZE = "STATE_SELECT_SIZE"
+STATE_SOLO_SETUP  = "STATE_SOLO_SETUP"
 STATE_PLAYING     = "STATE_PLAYING"
 STATE_RACE        = "STATE_RACE"
 STATE_RESULT      = "STATE_RESULT"
+STATE_NAME_INPUT  = "STATE_NAME_INPUT"
 
 
 
