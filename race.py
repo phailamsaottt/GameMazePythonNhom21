@@ -10,18 +10,8 @@ import pygame
 import config
 import database
 import records
-from algorithms import (
-    PATH,
-    WALL,
-    Maze,
-    astar,
-    bfs,
-    dfs,
-    generate_maze,
-    solve_astar,
-    solve_bfs,
-    solve_dfs,
-)
+from generator import PATH, WALL, Maze, generate_maze
+from pathfinding import astar, bfs, dfs, solve_astar, solve_bfs, solve_dfs
 
 Color = tuple[int, int, int]
 Cell = tuple[int, int]
