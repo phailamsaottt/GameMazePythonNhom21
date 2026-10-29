@@ -265,7 +265,7 @@ class MenuScreen:
         """Tạo 4 nút căn giữa màn hình theo chiều ngang, xếp dọc với khoảng cách đều."""
         button_specs = [
             ("PLAY", config.STATE_SELECT_SIZE),
-            ("2 PLAYERS", config.STATE_NAME_INPUT),
+            ("2 PLAYERS", config.STATE_SELECT_RACE_SIZE),
             ("LEADERBOARD", config.STATE_RESULT),
             ("EXIT", "QUIT"),
         ]
@@ -395,15 +395,19 @@ class SelectSizeScreen:
         ((170, 49, 57), (210, 62, 68), (255, 145, 145), (255, 255, 255)),
     )
 
-    def __init__(self, screen: pygame.Surface) -> None:
+    def __init__(
+        self,
+        screen: pygame.Surface,
+        next_state: str = config.STATE_SOLO_SETUP,
+    ) -> None:
         self.screen = screen
+        self.next_state = next_state
         self.font = _load_font(config.FONT_SIZE_MEDIUM)
         self.title_font = _load_font(config.FONT_SIZE_LARGE)
         self.click_sound = _load_sound()
         self.selected_size: tuple[int, int] | None = None
 
         self.background = self._load_background()
-        self.button_image = self._load_button_image()
         button_width, button_height = 340, 64
         gap = 22
         total_height = len(self.CHOICES) * button_height + (len(self.CHOICES) - 1) * gap
@@ -421,7 +425,7 @@ class SelectSizeScreen:
                 text=label,
                 font=self.font,
                 color_theme=self.DIFFICULTY_THEMES[index],
-                target_state=config.STATE_SOLO_SETUP,
+                target_state=self.next_state,
             )
             self.buttons.append(button)
             self._sizes_by_button[id(button)] = dimensions
@@ -444,24 +448,6 @@ class SelectSizeScreen:
                     continue
         return None
 
-    @staticmethod
-    def _load_button_image() -> pygame.Surface | None:
-        candidates = (
-            config.BASE_DIR / "Assets" / "images" / "UI" / "button.png",
-            config.BASE_DIR / "Assets" / "images" / "UI" / "button_wood.png",
-            config.IMAGES_DIR / "UI" / "button.png",
-        )
-        for path in candidates:
-            if path.is_file():
-                try:
-                    image = pygame.image.load(str(path))
-                    if pygame.display.get_surface() is not None:
-                        image = image.convert_alpha()
-                    return image
-                except (pygame.error, OSError, ValueError):
-                    continue
-        return None
-
     def handle_event(self, event: pygame.event.Event) -> str | None:
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             self.selected_size = None
@@ -476,7 +462,7 @@ class SelectSizeScreen:
                             self.click_sound.play()
                         except pygame.error:
                             pass
-                    return config.STATE_SOLO_SETUP
+                    return self.next_state
         return None
 
     def update(self) -> None:
@@ -650,8 +636,13 @@ class SoloSetupScreen:
 class NameInputScreen:
     """Collect two local player names before starting a two-player race."""
 
-    def __init__(self, screen: pygame.Surface) -> None:
+    def __init__(
+        self,
+        screen: pygame.Surface,
+        back_state: str = config.STATE_MENU,
+    ) -> None:
         self.screen = screen
+        self.back_state = back_state
         self.font = _load_font(config.FONT_SIZE_MEDIUM)
         self.title_font = _load_font(config.FONT_SIZE_LARGE)
         self.player_names = ["Player 1", "Player 2"]
@@ -737,7 +728,7 @@ class NameInputScreen:
     def handle_event(self, event: pygame.event.Event) -> str | None:
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
-                return config.STATE_MENU
+                return self.back_state
             if event.key == pygame.K_TAB:
                 self.active_field = 1 - self.active_field
                 return None

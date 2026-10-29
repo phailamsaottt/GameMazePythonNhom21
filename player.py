@@ -199,13 +199,6 @@ class Player(pygame.sprite.Sprite):
 			return frames[0].get_rect()
 		return bounds[0].unionall(bounds[1:])
 
-	def _fit_surface(self, surface: pygame.Surface) -> pygame.Surface:
-		"""Scale the visible sprite (not its transparent padding) to a tile."""
-		visible_bounds = surface.get_bounding_rect(min_alpha=1)
-		if visible_bounds.width and visible_bounds.height:
-			surface = surface.subsurface(visible_bounds).copy()
-		return self._scale_surface_to_tile(surface)
-
 	def _scale_surface_to_tile(self, surface: pygame.Surface) -> pygame.Surface:
 		"""Scale a tightly cropped character while preserving its aspect ratio."""
 		width, height = surface.get_size()

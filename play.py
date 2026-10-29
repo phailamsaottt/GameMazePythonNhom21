@@ -410,10 +410,24 @@ class PlayingScreen:
         self, target: pygame.Surface, rows: int, cols: int
     ) -> tuple[int, float, int, int]:
         base_cell = max(1, int(config.CELL_SIZE))
-        cell = max(1, min(base_cell, target.get_width() // max(1, cols), target.get_height() // max(1, rows)))
+        rows = max(1, rows)
+        cols = max(1, cols)
+        width, height = target.get_size()
+
+        # Keep a clear band for the timer and bottom controls while allowing
+        # small mazes to use more of the available window. The same square
+        # cell size is used on both axes, so the maze aspect ratio is unchanged.
+        usable_width = max(1, int(width * 0.92))
+        usable_height = max(1, int(height * 0.70))
+        fit_cell = max(1, min(usable_width // cols, usable_height // rows))
+
+        # Never make a maze smaller than the existing fit. This keeps Medium
+        # and Hard layouts that already fill the window at their current size.
+        current_cell = max(1, min(base_cell, width // cols, height // rows))
+        cell = max(current_cell, fit_cell)
         scale = cell / base_cell
-        offset_x = (target.get_width() - cols * cell) // 2
-        offset_y = (target.get_height() - rows * cell) // 2
+        offset_x = (width - cols * cell) // 2
+        offset_y = (height - rows * cell) // 2
         return cell, scale, offset_x, offset_y
 
     def _get_tile_variants(

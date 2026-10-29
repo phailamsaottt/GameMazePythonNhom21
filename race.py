@@ -444,6 +444,7 @@ class TwoPlayerScreen:
         self.victory_sound_played = False
         self.elapsed_time = 0.0
         self.final_elapsed_ms: int | None = None
+        self.hud_idle_time = 0.0
 
         self.fonts = Fonts(
             _load_font(config.FONT_SIZE_SMALL),
@@ -537,7 +538,9 @@ class TwoPlayerScreen:
     def update(self, dt: float) -> None:
         if self.state != "playing":
             return
-        self.elapsed_time += max(0.0, float(dt))
+        frame_time = max(0.0, float(dt))
+        self.elapsed_time += frame_time
+        self.hud_idle_time += frame_time
         keys = pygame.key.get_pressed()
         for player in self.players:
             player.update(keys, self.maze.grid, dt)
@@ -561,6 +564,104 @@ class TwoPlayerScreen:
         self._map_cache[cell] = result
         return result
 
+    def _idle_portrait(self, player_index: int, size: int = 40) -> pygame.Surface:
+        """Render a player's idle animation into a compact HUD portrait."""
+        player = self.players[player_index]
+        idle_frames = player.animations.get("idle", [])
+        if idle_frames:
+            if Player._is_gif(idle_frames[0]):
+                animation = idle_frames[0]
+                source = animation.current_surface
+                frame = pygame.Surface(source.get_size(), pygame.SRCALPHA)
+                animation.render(frame, (0, 0))
+                source = frame
+            else:
+                frame_duration = max(0.05, float(getattr(player, "animation_speed", 0.15)))
+                frame_index = int(self.hud_idle_time / frame_duration) % len(idle_frames)
+                source = idle_frames[frame_index]
+        else:
+            source = getattr(player, "image", None)
+
+        portrait = pygame.Surface((size, size), pygame.SRCALPHA)
+        if source is None:
+            pygame.draw.circle(portrait, (220, 225, 235), portrait.get_rect().center, size // 3)
+            return portrait
+
+        source_width, source_height = source.get_size()
+        scale = min(size / max(1, source_width), size / max(1, source_height))
+        fitted_size = (
+            max(1, round(source_width * scale)),
+            max(1, round(source_height * scale)),
+        )
+        fitted = pygame.transform.scale(source, fitted_size)
+        portrait.blit(fitted, fitted.get_rect(center=portrait.get_rect().center))
+        return portrait
+
+    @staticmethod
+    def _fit_hud_name(
+        font: pygame.font.Font,
+        text: str,
+        color: Color,
+        max_width: int,
+    ) -> pygame.Surface:
+        shown = text
+        rendered = font.render(shown, True, color)
+        while rendered.get_width() > max_width and shown:
+            shown = shown[:-1]
+            rendered = font.render(shown.rstrip() + "...", True, color)
+        return rendered
+
+    def _draw_top_hud(self, screen: pygame.Surface) -> None:
+        """Draw both player name cards and the shared green race timer."""
+        width = screen.get_width()
+        timer = self.timer_font.render(self._format_time(self._elapsed_ms()), True, (120, 255, 120))
+        timer_rect = pygame.Rect(0, 0, timer.get_width() + 28, timer.get_height() + 14)
+        timer_rect.midtop = (width // 2, 12)
+        timer_card = pygame.Surface(timer_rect.size, pygame.SRCALPHA)
+        pygame.draw.rect(timer_card, (8, 12, 10, 220), timer_card.get_rect(), border_radius=8)
+        screen.blit(timer_card, timer_rect)
+        screen.blit(timer, timer.get_rect(center=timer_rect.center))
+
+        accents = ((72, 218, 255), (255, 184, 86))
+        screen_margin = 16
+        card_height = 56
+        portrait_size = 40
+        gap = 9
+        max_card_width = max(112, (width - timer_rect.width - 48) // 2)
+
+        for index, right_aligned in ((0, False), (1, True)):
+            name = self._fit_hud_name(
+                self.fonts.medium,
+                self.player_names[index],
+                accents[index],
+                max(20, max_card_width - 20 - portrait_size - gap),
+            )
+            card_width = min(
+                max_card_width,
+                name.get_width() + 20 + portrait_size + gap,
+            )
+            card = pygame.Surface((card_width, card_height), pygame.SRCALPHA)
+            pygame.draw.rect(card, (9, 14, 24, 222), card.get_rect(), border_radius=9)
+            pygame.draw.rect(card, (*accents[index], 150), card.get_rect(), 1, border_radius=9)
+            portrait = self._idle_portrait(index, portrait_size)
+
+            if right_aligned:
+                portrait_rect = portrait.get_rect(midright=(card_width - 8, card_height // 2))
+                name_rect = name.get_rect(
+                    midright=(portrait_rect.left - gap, card_height // 2)
+                )
+                card_x = width - screen_margin - card_width
+            else:
+                portrait_rect = portrait.get_rect(midleft=(8, card_height // 2))
+                name_rect = name.get_rect(
+                    midleft=(portrait_rect.right + gap, card_height // 2)
+                )
+                card_x = screen_margin
+
+            card.blit(portrait, portrait_rect)
+            card.blit(name, name_rect)
+            screen.blit(card, (card_x, 12))
+
     def draw(self) -> None:
         screen = self.screen
         screen.fill(config.COLOR_BG)
@@ -574,6 +675,10 @@ class TwoPlayerScreen:
         goal_row, goal_col = self.maze.goal
         screen.blit(finish, (offset_x + goal_col * cell, offset_y + goal_row * cell))
 
+        players_near_each_other = (
+            abs(self.players[0].x - self.players[1].x) < self.cell_size
+            and abs(self.players[0].y - self.players[1].y) < self.cell_size
+        )
         for player_index, player in enumerate(self.players):
             # Player coordinates use the base CELL_SIZE; scale positions and
             # sprite dimensions together so large mazes remain legible.
@@ -601,20 +706,28 @@ class TwoPlayerScreen:
             )
             pygame.draw.rect(badge, (12, 18, 27, 210), badge.get_rect(), border_radius=6)
             badge.blit(name_surface, (7, 4))
-            badge_rect = badge.get_rect(
-                midbottom=(center[0], center[1] - round(sprite_height * scale) // 2 - 4)
-            )
+            badge_y = center[1] - round(sprite_height * scale) // 2 - 4
+            if players_near_each_other:
+                if player_index == 0:
+                    badge_rect = badge.get_rect(bottomright=(center[0] - 5, badge_y))
+                else:
+                    badge_rect = badge.get_rect(bottomleft=(center[0] + 5, badge_y))
+            else:
+                badge_rect = badge.get_rect(midbottom=(center[0], badge_y))
+            # At the maze's top edge, put the avatar label below the sprite so
+            # it stays clear of the fixed HUD cards and timer.
+            if badge_rect.top < 72:
+                label_y = center[1] + round(sprite_height * scale) // 2 + 4
+                if players_near_each_other and player_index == 0:
+                    badge_rect = badge.get_rect(topright=(center[0] - 5, label_y))
+                elif players_near_each_other:
+                    badge_rect = badge.get_rect(topleft=(center[0] + 5, label_y))
+                else:
+                    badge_rect = badge.get_rect(midtop=(center[0], label_y))
             badge_rect.clamp_ip(screen.get_rect())
             screen.blit(badge, badge_rect)
 
-        shared_timer = self.timer_font.render(
-            self._format_time(self._elapsed_ms()), True, (255, 220, 100)
-        )
-        p1_label = self.fonts.medium.render(self.player_names[0], True, (80, 220, 255))
-        p2_label = self.fonts.medium.render(self.player_names[1], True, (255, 190, 90))
-        screen.blit(p1_label, (20, 14))
-        screen.blit(p2_label, p2_label.get_rect(topright=(screen.get_width() - 20, 14)))
-        screen.blit(shared_timer, shared_timer.get_rect(midtop=(screen.get_width() // 2, 14)))
+        self._draw_top_hud(screen)
 
         if self.state == "victory" and self.winner_index is not None:
             overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)

@@ -54,8 +54,15 @@ def main() -> None:
   
     menu_screen = MenuScreen(screen)
     select_size_screen = SelectSizeScreen(screen)
+    race_size_screen = SelectSizeScreen(
+        screen,
+        next_state=config.STATE_NAME_INPUT,
+    )
     solo_setup_screen: SoloSetupScreen | None = None
-    name_input_screen = NameInputScreen(screen)
+    name_input_screen = NameInputScreen(
+        screen,
+        back_state=config.STATE_SELECT_RACE_SIZE,
+    )
     two_player_screen: TwoPlayerScreen | None = None
     leaderboard_screen = LeaderboardScreen(screen)
     play_screen: PlayingScreen | None = None
@@ -92,6 +99,14 @@ def main() -> None:
                     current_state = config.STATE_SOLO_SETUP
                 elif next_state:
                     current_state = next_state
+            elif current_state == config.STATE_SELECT_RACE_SIZE:
+                next_state = race_size_screen.handle_event(event)
+                if next_state == config.STATE_NAME_INPUT:
+                    if race_size_screen.selected_size is None:
+                        continue
+                    current_state = config.STATE_NAME_INPUT
+                elif next_state:
+                    current_state = next_state
             elif current_state == config.STATE_SOLO_SETUP:
                 if solo_setup_screen is None:
                     current_state = config.STATE_SELECT_SIZE
@@ -115,11 +130,17 @@ def main() -> None:
             elif current_state == config.STATE_NAME_INPUT:
                 next_state = name_input_screen.handle_event(event)
                 if next_state == config.STATE_RACE:
+                    if race_size_screen.selected_size is None:
+                        current_state = config.STATE_SELECT_RACE_SIZE
+                        continue
+                    rows, cols = race_size_screen.selected_size
                     names = name_input_screen.selected_names or ("Player 1", "Player 2")
                     two_player_screen = TwoPlayerScreen(
                         screen,
                         player1_name=names[0],
                         player2_name=names[1],
+                        rows=rows,
+                        cols=cols,
                     )
                     _start_background_music()
                     current_state = config.STATE_RACE
@@ -155,6 +176,8 @@ def main() -> None:
             menu_screen.update()
         elif current_state == config.STATE_SELECT_SIZE:
             select_size_screen.update()
+        elif current_state == config.STATE_SELECT_RACE_SIZE:
+            race_size_screen.update()
         elif current_state == config.STATE_SOLO_SETUP:
             if solo_setup_screen is not None:
                 solo_setup_screen.update()
@@ -176,6 +199,8 @@ def main() -> None:
             menu_screen.draw()
         elif current_state == config.STATE_SELECT_SIZE:
             select_size_screen.draw(screen)
+        elif current_state == config.STATE_SELECT_RACE_SIZE:
+            race_size_screen.draw(screen)
         elif current_state == config.STATE_SOLO_SETUP:
             if solo_setup_screen is not None:
                 solo_setup_screen.draw(screen)
