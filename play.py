@@ -695,7 +695,12 @@ class PlayingScreen:
         height = max(name.get_height(), timer.get_height()) + 12
         background = pygame.Surface((width, height), pygame.SRCALPHA)
         background.fill((8, 12, 10, 210))
-        rect = background.get_rect(midtop=(target.get_width() // 2, 12))
+        # Keep the timer together with the Find Path control in the lower-right
+        # HUD area, outside the maze's top edge where it could hide cells.
+        button_rect = self.find_path_button_rect
+        rect = background.get_rect(
+            bottomright=(button_rect.right, max(0, button_rect.top - 8))
+        )
         target.blit(background, rect)
         content_width = name.get_width() + gap + timer.get_width()
         left = rect.centerx - content_width // 2
@@ -751,8 +756,8 @@ class PlayingScreen:
         )
         self._draw_player_scaled(target, scale, offset_x, offset_y)
         if self.state == "playing":
-            self._draw_timer(target)
             self._draw_find_path_button(target)
+            self._draw_timer(target)
 
         if self.state == "victory":
             overlay = pygame.Surface(target.get_size(), pygame.SRCALPHA)
