@@ -4,13 +4,13 @@ import pygame
 import config
 
 from menu import MenuScreen, NameInputScreen, SelectSizeScreen, SoloSetupScreen
-from race import TwoPlayerScreen
-from play import PlayingScreen
+from play import PlayingScreen, TwoPlayerScreen
 from leaderboard import LeaderboardScreen
 
 
 def _start_background_music() -> None:
-    """Start the gameplay loop without interrupting menu or effect sounds."""
+
+
     if not pygame.mixer.get_init():
         try:
             pygame.mixer.init()
@@ -44,6 +44,13 @@ def _stop_background_music() -> None:
 
 def main() -> None:
     pygame.init()
+    icon_path = Path(config.BASE_DIR) / "Assets" / "images" / "icon.png"
+    try:
+        window_icon = pygame.image.load(str(icon_path))
+        pygame.display.set_icon(window_icon)
+    except (pygame.error, OSError):
+        pass
+
     screen = pygame.display.set_mode((config.WINDOW_WIDTH, config.WINDOW_HEIGHT))
     pygame.display.set_caption(config.GAME_TITLE)
     clock = pygame.time.Clock()
@@ -51,7 +58,7 @@ def main() -> None:
 
     current_state = config.STATE_MENU
 
-  
+
     menu_screen = MenuScreen(screen)
     select_size_screen = SelectSizeScreen(screen)
     race_size_screen = SelectSizeScreen(
@@ -70,12 +77,12 @@ def main() -> None:
     running = True
 
     # Main Game Loop
-   
+
     while running:
         dt = min(clock.tick(config.FPS) / 1000.0, 0.1)
-     
-        # 1: Event 
-   
+
+        # 1: Event
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -169,9 +176,9 @@ def main() -> None:
                 if next_state:
                     current_state = next_state
 
-        
+
         # 2: State Updates
-      
+
         if current_state == config.STATE_MENU:
             menu_screen.update()
         elif current_state == config.STATE_SELECT_SIZE:
@@ -194,7 +201,7 @@ def main() -> None:
 
 
         #3: Rendering
-       
+
         if current_state == config.STATE_MENU:
             menu_screen.draw()
         elif current_state == config.STATE_SELECT_SIZE:
@@ -212,17 +219,15 @@ def main() -> None:
         elif current_state == config.STATE_PLAYING:
             if play_screen is not None:
                 play_screen.draw(screen)
-          
+
         elif current_state == config.STATE_RESULT:
             leaderboard_screen.draw(screen)
-       
+
     #4 update
-     
+
         pygame.display.flip()
 
-    
-    # Exit
-   
+
     pygame.quit()
     sys.exit()
 

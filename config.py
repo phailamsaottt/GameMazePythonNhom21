@@ -22,7 +22,7 @@ DB_PATH = BASE_DIR / "maze_game.db"
 WINDOW_WIDTH  = 1280
 WINDOW_HEIGHT = 720
 FPS           = 60
-GAME_TITLE    = "Maze Game"
+GAME_TITLE    = "Maze Runner"
 
 
 

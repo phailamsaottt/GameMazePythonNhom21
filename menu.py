@@ -12,6 +12,12 @@ except ImportError:
 
 import config
 from player import Player
+from ui_effects import (
+    confirm_dialog_rects,
+    draw_confirm_dialog,
+    draw_hover_arrow,
+    play_ui_click,
+)
 
 
 def _load_font(size: int) -> pygame.font.Font:
@@ -221,6 +227,7 @@ class Button:
         text_surface = self.font.render(self.text, True, text_color)
         text_rect = text_surface.get_rect(center=self.rect.center)
         surface.blit(text_surface, text_rect)
+        draw_hover_arrow(surface, self.rect, self.is_hovered)
 
 
 class MenuScreen:
@@ -233,14 +240,35 @@ class MenuScreen:
   
         self.font = _load_font(config.FONT_SIZE_MEDIUM)
         self.title_font = _load_title_font(int(config.FONT_SIZE_TITLE * 1.6))
+        self.title_image = self._load_title_image()
 
         self.click_sound = _load_sound()
+        self.show_confirm_popup = False
+        self.confirm_selected = 0
 
      
         self.background = self._load_background()
 
    
         self.buttons: list[Button] = self._create_buttons()
+
+    def _load_title_image(self) -> pygame.Surface | None:
+        candidates = (
+            config.IMAGES_DIR / "UI" / "maze_runner_title.png",
+            Path(config.BASE_DIR) / "assets" / "images" / "UI" / "maze_runner_title.png",
+        )
+        for path in candidates:
+            if not path.is_file():
+                continue
+            try:
+                image = pygame.image.load(str(path)).convert_alpha()
+                max_width = min(460, config.WINDOW_WIDTH - 40)
+                scale = max_width / image.get_width()
+                size = (max_width, max(1, round(image.get_height() * scale)))
+                return pygame.transform.scale(image, size)
+            except (pygame.error, OSError, ValueError):
+                continue
+        return None
 
     def _load_background(self) -> pygame.Surface | None:
       
@@ -311,18 +339,51 @@ class MenuScreen:
         Trả về trạng thái tiếp theo (ví dụ: STATE_PLAYING, STATE_RACE, STATE_RESULT, 'QUIT')
         hoặc None nếu không có nút nào được nhấn.
         """
+        if self.show_confirm_popup:
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    self.show_confirm_popup = False
+                elif event.key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN):
+                    self.confirm_selected = 1 - self.confirm_selected
+                elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                    self.show_confirm_popup = False
+                    if self.confirm_selected == 1:
+                        return "QUIT"
+                return None
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                _, continue_rect, exit_rect = confirm_dialog_rects(self.screen.get_size())
+                if continue_rect.collidepoint(event.pos):
+                    play_ui_click()
+                    self.show_confirm_popup = False
+                elif exit_rect.collidepoint(event.pos):
+                    play_ui_click()
+                    self.show_confirm_popup = False
+                    return "QUIT"
+            return None
+
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self.show_confirm_popup = True
+            self.confirm_selected = 0
+            return None
+
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             for button in self.buttons:
                 if button.is_clicked(event.pos):
+                    if button.target_state == "QUIT":
+                        self.show_confirm_popup = True
+                        self.confirm_selected = 0
+                        if self.click_sound is not None:
+                            try:
+                                self.click_sound.play()
+                            except Exception:
+                                pass
+                        return None
                     if self.click_sound is not None:
                         try:
                             self.click_sound.play()
                         except Exception:
                             pass
                     return button.target_state
-
-        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-            return "QUIT"
 
         return None
 
@@ -352,6 +413,8 @@ class MenuScreen:
 
         # 4. Gợi ý điều khiển chân trang
         self._draw_footer(target_screen)
+        if self.show_confirm_popup:
+            draw_confirm_dialog(target_screen, self.title_font, self.font, self.confirm_selected)
 
     def _draw_background_pattern(self, surface: pygame.Surface) -> None:
         """Trang trí lưới pixel tinh tế khi chưa có ảnh background."""
@@ -364,7 +427,14 @@ class MenuScreen:
 
     def _draw_title(self, surface: pygame.Surface) -> None:
         center_x = config.WINDOW_WIDTH // 2
-        title_text = "Maze Game"
+        if self.title_image is not None:
+            surface.blit(
+                self.title_image,
+                self.title_image.get_rect(center=(center_x, 145)),
+            )
+            return
+
+        title_text = "Maze Runner"
         shadow = self.title_font.render(title_text, True, (20, 20, 28))
         shadow_rect = shadow.get_rect(center=(center_x + 3, 147))
         surface.blit(shadow, shadow_rect)
@@ -575,9 +645,13 @@ class SoloSetupScreen:
             if self.left_arrow_rect.collidepoint(event.pos) or self.right_arrow_rect.collidepoint(event.pos):
                 self.character_id = 2 if self.character_id == 1 else 1
                 self.name_active = False
+                play_ui_click()
                 return None
             if self.start_button.is_clicked(event.pos):
-                return self._start()
+                next_state = self._start()
+                if next_state:
+                    play_ui_click()
+                return next_state
         return None
 
     def update(self) -> None:
@@ -619,6 +693,7 @@ class SoloSetupScreen:
         character_label = self.font.render("Choose your character", True, config.COLOR_TEXT)
         target.blit(character_label, character_label.get_rect(center=(target.get_width() // 2, 350)))
         for rect, symbol in ((self.left_arrow_rect, "<"), (self.right_arrow_rect, ">")):
+            draw_hover_arrow(target, rect)
             pygame.draw.rect(target, (43, 57, 77), rect, border_radius=12)
             pygame.draw.rect(target, (100, 210, 235), rect, width=2, border_radius=12)
             arrow = self.title_font.render(symbol, True, (240, 245, 250))
@@ -752,6 +827,7 @@ class NameInputScreen:
                     self.active_field = index
                     return None
             if self.start_button.is_clicked(event.pos):
+                play_ui_click()
                 return self._start()
         return None
 

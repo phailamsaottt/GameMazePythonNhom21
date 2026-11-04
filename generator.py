@@ -636,7 +636,7 @@ def generate_random_maze(
     start: tuple[int, int] | None = None,
     goal: tuple[int, int] | None = None,
 ) -> Maze:
-    """Helper for 100% randomized maze generation with connectivity guarantee."""
+
     return generate_maze(
         rows=rows,
         cols=cols,

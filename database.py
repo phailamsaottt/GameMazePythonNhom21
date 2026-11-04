@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+import shutil
 import sqlite3
 from typing import Any, Iterable, Iterator, Mapping, Protocol
 import uuid
@@ -64,8 +65,11 @@ class MazeLike(Protocol):
 @contextmanager
 def get_connection(db_path: str | Path | None = None) -> Iterator[sqlite3.Connection]:
     path = Path(db_path) if db_path else Path(DB_PATH)
+    path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
+
+ 
     try:
         conn.executescript(SCHEMA)
         columns = {row[1] for row in conn.execute("PRAGMA table_info(play_history)")}
@@ -73,6 +77,23 @@ def get_connection(db_path: str | Path | None = None) -> Iterator[sqlite3.Connec
             conn.execute(
                 "ALTER TABLE play_history ADD COLUMN player_name TEXT NOT NULL DEFAULT 'PLAYER'"
             )
+    except sqlite3.DatabaseError as exc:
+        conn.rollback()
+        conn.close()
+        if "malformed" not in str(exc).lower() and "not a database" not in str(exc).lower():
+            raise
+
+        backup = path.with_name(f"{path.name}.corrupt")
+        suffix = 1
+        while backup.exists():
+            backup = path.with_name(f"{path.name}.corrupt.{suffix}")
+            suffix += 1
+        if path.exists():
+            shutil.move(str(path), str(backup))
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        conn.executescript(SCHEMA)
+    try:
         yield conn
         conn.commit()
     except Exception:

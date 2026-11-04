@@ -10,6 +10,7 @@ import pygame
 
 import config
 import database
+from ui_effects import draw_hover_arrow, play_ui_click
 
 
 def _load_font(size: int, *, bold: bool = False) -> pygame.font.Font:
@@ -116,8 +117,7 @@ class LeaderboardScreen:
         self.rows = ranked
         self.top_rows = ranked[:5]
 
-        # This schema does not store player accounts; every play-mode row belongs
-        # to the local player, so the latest completed row is the "You" entry.
+   
         self.latest_user_row = max(selected, key=lambda row: int(row.get("id", 0)), default=None)
         self.latest_user_rank = None
         if self.latest_user_row is not None:
@@ -153,8 +153,10 @@ class LeaderboardScreen:
                     if name != self.selected_difficulty:
                         self.selected_difficulty = name
                         self._reload_data()
+                    play_ui_click()
                     return None
             if self.back_rect.collidepoint(event.pos):
+                play_ui_click()
                 return config.STATE_MENU
         return None
 
@@ -215,6 +217,7 @@ class LeaderboardScreen:
             pygame.draw.rect(target, color, rect, border_radius=12)
             border = self.COLORS["text"] if selected else self.COLORS["dark_border"]
             pygame.draw.rect(target, border, rect, width=2, border_radius=12)
+            draw_hover_arrow(target, rect, hovered)
             label = self.body_font.render(name, True, self.COLORS["text"])
             target.blit(label, label.get_rect(center=rect.center))
 
@@ -358,6 +361,7 @@ class LeaderboardScreen:
         back_fill = (61, 79, 102) if self.back_rect.collidepoint(mouse_pos) else (39, 52, 71)
         pygame.draw.rect(target, back_fill, self.back_rect, border_radius=12)
         pygame.draw.rect(target, self.COLORS["cyan"], self.back_rect, width=2, border_radius=12)
+        draw_hover_arrow(target, self.back_rect)
         back_text = self.body_font.render("Back", True, self.COLORS["text"])
         target.blit(back_text, back_text.get_rect(center=self.back_rect.center))
 

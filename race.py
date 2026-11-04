@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-import sqlite3
 from typing import Any, Callable, NamedTuple
 
 import pygame
@@ -11,7 +10,6 @@ import pygame
 import config
 import database
 import records
-from player import Player
 from generator import PATH, WALL, Maze, generate_maze
 from pathfinding import astar, bfs, dfs, solve_astar, solve_bfs, solve_dfs
 
@@ -49,29 +47,6 @@ def _load_font(size: int) -> pygame.font.Font:
         except (pygame.error, OSError):
             pass
     return pygame.font.SysFont("Roboto,Arial,Segoe UI,sans-serif", size)
-
-
-def _load_victory_sound() -> pygame.mixer.Sound | None:
-    """Load the finish cue safely, returning None if audio is unavailable."""
-    try:
-        if pygame.mixer.get_init() is None:
-            pygame.mixer.init()
-    except pygame.error:
-        return None
-
-    base_dir = Path(config.BASE_DIR)
-    candidates = (
-        base_dir / "Assets" / "sounds" / "finish.mp3",
-        base_dir / "Assets" / "sounds" / "finish.MP3",
-        base_dir / "assets" / "sounds" / "finish.mp3",
-    )
-    for sound_path in candidates:
-        if sound_path.is_file():
-            try:
-                return pygame.mixer.Sound(str(sound_path))
-            except (pygame.error, OSError):
-                continue
-    return None
 
 
 def mix(a: Color, b: Color, t: float) -> Color:
@@ -415,343 +390,265 @@ class RaceScreen:
             panel.draw(screen, is_winner=self.finished and panel.rank == 1 and panel.found)
 
 
-class TwoPlayerScreen:
-    """Local two-player maze race with independent controls and one shared clock."""
+
+class AutoSolveRaceView:
+    """Render the solo auto-solve search in three side-by-side panels."""
 
     def __init__(
         self,
-        screen: pygame.Surface,
-        player1_name: str = "Player 1",
-        player2_name: str = "Player 2",
-        rows: int = config.DEFAULT_ROWS,
-        cols: int = config.DEFAULT_COLS,
+        wall_tile: pygame.Surface,
+        path_tile: pygame.Surface,
+        finish_icon: pygame.Surface,
+        panel_title_font: pygame.font.Font,
+        panel_metric_font: pygame.font.Font,
+        hud_font: pygame.font.Font,
     ) -> None:
-        self.screen = screen
-        self.maze = generate_maze(rows=rows, cols=cols)
-        self.player_names = (
-            player1_name.strip() or "Player 1",
-            player2_name.strip() or "Player 2",
-        )
-        start_row, start_col = self.maze.start
-        self.players = (
-            Player(start_col, start_row, controls="wasd", character_id=1, spawn_offset=(-2.5, 0)),
-            Player(start_col, start_row, controls="arrows", character_id=2, spawn_offset=(2.5, 0)),
-        )
-        self.state = "playing"
-        self.winner_index: int | None = None
-        self.record_save_error: str | None = None
-        self.victory_sound = _load_victory_sound()
-        self.victory_sound_played = False
-        self.elapsed_time = 0.0
-        self.final_elapsed_ms: int | None = None
-        self.hud_idle_time = 0.0
+        self.wall_tile = wall_tile
+        self.path_tile = path_tile
+        self.finish_icon = finish_icon
+        self.panel_title_font = panel_title_font
+        self.panel_metric_font = panel_metric_font
+        self.hud_font = hud_font
+        self._tile_variants: dict[int, tuple[pygame.Surface, pygame.Surface, pygame.Surface]] = {}
+        self._maze_layers: dict[int, pygame.Surface] = {}
+        self.maze: Maze | Any | None = None
+        self.solver_runs: list[Any] = []
 
-        self.fonts = Fonts(
-            _load_font(config.FONT_SIZE_SMALL),
-            _load_font(config.FONT_SIZE_MEDIUM),
-            _load_font(config.FONT_SIZE_LARGE),
-        )
-        self.timer_font = _load_font(28)
-        self.victory_font = _load_font(34)
-        self.cell_size = max(1, int(config.CELL_SIZE))
-        self.wall_tile = self._load_map_tile("wall.png", config.COLOR_WALL)
-        self.path_tile = self._load_map_tile("path.png", config.COLOR_PATH)
-        self.finish_tile = self._load_map_tile("finish.png", config.COLOR_END)
-        panel_path = Path(config.BASE_DIR) / "Assets" / "images" / "UI" / "panel.png"
-        self.victory_panel = self._load_image(panel_path)
-        if self.victory_panel is None:
-            self.victory_panel = pygame.Surface((560, 300), pygame.SRCALPHA)
-            self.victory_panel.fill((8, 12, 20, 230))
-        else:
-            self.victory_panel = pygame.transform.scale(self.victory_panel, (560, 300))
+    def clear_cache(self) -> None:
+        self._tile_variants.clear()
+        self._maze_layers.clear()
 
-        self.back_button = pygame.Rect(screen.get_width() // 2 - 120, screen.get_height() // 2 + 100, 240, 48)
-        self._map_cache: dict[int, pygame.Surface] = {}
+    def draw(self, target: pygame.Surface, maze: Maze, solver_runs: list[Any]) -> None:
+        self.maze = maze
+        self.solver_runs = solver_runs
+        self._draw_auto_solve_split_view(target)
 
-    @staticmethod
-    def _load_image(path: Path) -> pygame.Surface | None:
-        try:
-            image = pygame.image.load(str(path))
-            return image.convert_alpha() if pygame.display.get_surface() else image.copy()
-        except (pygame.error, OSError, ValueError):
-            return None
+    def _get_tile_variants(
+        self, size: int
+    ) -> tuple[pygame.Surface, pygame.Surface, pygame.Surface]:
+        if size not in self._tile_variants:
+            self._tile_variants[size] = tuple(
+                pygame.transform.scale(tile, (size, size))
+                for tile in (self.wall_tile, self.path_tile, self.finish_icon)
+            )  # type: ignore[assignment]
+        return self._tile_variants[size]
 
-    def _load_map_tile(self, filename: str, fallback_color: tuple[int, int, int]) -> pygame.Surface:
-        candidates = (
-            Path(config.BASE_DIR) / "Assets" / "images" / "map" / filename,
-            Path(config.BASE_DIR) / "Assets" / "images" / "Map" / filename,
-        )
-        for path in candidates:
-            if path.is_file():
-                image = self._load_image(path)
-                if image is not None:
-                    return pygame.transform.scale(image, (self.cell_size, self.cell_size))
-        fallback = pygame.Surface((self.cell_size, self.cell_size))
-        fallback.fill(fallback_color)
-        return fallback
+    def _get_maze_layer(
+        self, cell: int, rows: int, cols: int
+    ) -> pygame.Surface:
+        layer = self._maze_layers.get(cell)
+        if layer is not None:
+            return layer
 
-    def _elapsed_ms(self) -> int:
-        if self.final_elapsed_ms is not None:
-            return self.final_elapsed_ms
-        return max(0, round(self.elapsed_time * 1000))
-
-    @staticmethod
-    def _format_time(milliseconds: int) -> str:
-        minutes, remaining = divmod(milliseconds, 60_000)
-        seconds, millis = divmod(remaining, 1_000)
-        return f"{minutes:02}:{seconds:02}.{millis:03}"
-
-    def _finish(self, player_index: int) -> None:
-        if self.state != "playing":
-            return
-        self.final_elapsed_ms = self._elapsed_ms()
-        self.winner_index = player_index
-        self.state = "victory"
-        if not self.victory_sound_played:
-            self.victory_sound_played = True
-            if self.victory_sound is not None:
-                try:
-                    self.victory_sound.play()
-                except pygame.error:
-                    pass
-        try:
-            database.save_play(
-                self.maze,
-                steps=0,
-                elapsed_ms=self.final_elapsed_ms,
-                player_name=self.player_names[player_index],
-            )
-        except (sqlite3.Error, OSError, ValueError) as exc:
-            self.record_save_error = str(exc)
-
-    def handle_event(self, event: pygame.event.Event) -> str | None:
-        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-            return config.STATE_MENU
-        if self.state == "victory":
-            if event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-                return config.STATE_MENU
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                if self.back_button.collidepoint(event.pos):
-                    return config.STATE_MENU
-        return None
-
-    def update(self, dt: float) -> None:
-        if self.state != "playing":
-            return
-        frame_time = max(0.0, float(dt))
-        self.elapsed_time += frame_time
-        self.hud_idle_time += frame_time
-        keys = pygame.key.get_pressed()
-        for player in self.players:
-            player.update(keys, self.maze.grid, dt)
-
-        goal_row, goal_col = self.maze.goal
-        for index, player in enumerate(self.players):
-            if player.grid_x == goal_col and player.grid_y == goal_row:
-                self._finish(index)
-                break
-
-    def _scaled_map(self, cell: int, rows: int, cols: int) -> pygame.Surface:
-        cached = self._map_cache.get(cell)
-        if cached is not None:
-            return cached
-        wall = pygame.transform.scale(self.wall_tile, (cell, cell))
-        path = pygame.transform.scale(self.path_tile, (cell, cell))
-        result = pygame.Surface((cols * cell, rows * cell))
+        wall_tile, path_tile, _ = self._get_tile_variants(cell)
+        layer = pygame.Surface((cols * cell, rows * cell))
         for row_index, row in enumerate(self.maze.grid):
             for col_index, value in enumerate(row):
-                result.blit(wall if value == WALL else path, (col_index * cell, row_index * cell))
-        self._map_cache[cell] = result
-        return result
-
-    def _idle_portrait(self, player_index: int, size: int = 40) -> pygame.Surface:
-        """Render a player's idle animation into a compact HUD portrait."""
-        player = self.players[player_index]
-        idle_frames = player.animations.get("idle", [])
-        if idle_frames:
-            if Player._is_gif(idle_frames[0]):
-                animation = idle_frames[0]
-                source = animation.current_surface
-                frame = pygame.Surface(source.get_size(), pygame.SRCALPHA)
-                animation.render(frame, (0, 0))
-                source = frame
-            else:
-                frame_duration = max(0.05, float(getattr(player, "animation_speed", 0.15)))
-                frame_index = int(self.hud_idle_time / frame_duration) % len(idle_frames)
-                source = idle_frames[frame_index]
-        else:
-            source = getattr(player, "image", None)
-
-        portrait = pygame.Surface((size, size), pygame.SRCALPHA)
-        if source is None:
-            pygame.draw.circle(portrait, (220, 225, 235), portrait.get_rect().center, size // 3)
-            return portrait
-
-        source_width, source_height = source.get_size()
-        scale = min(size / max(1, source_width), size / max(1, source_height))
-        fitted_size = (
-            max(1, round(source_width * scale)),
-            max(1, round(source_height * scale)),
-        )
-        fitted = pygame.transform.scale(source, fitted_size)
-        portrait.blit(fitted, fitted.get_rect(center=portrait.get_rect().center))
-        return portrait
+                tile = wall_tile if value == WALL else path_tile
+                layer.blit(tile, (col_index * cell, row_index * cell))
+        self._maze_layers[cell] = layer
+        return layer
 
     @staticmethod
-    def _fit_hud_name(
-        font: pygame.font.Font,
-        text: str,
-        color: Color,
-        max_width: int,
-    ) -> pygame.Surface:
-        shown = text
-        rendered = font.render(shown, True, color)
-        while rendered.get_width() > max_width and shown:
-            shown = shown[:-1]
-            rendered = font.render(shown.rstrip() + "...", True, color)
-        return rendered
+    def _brighten(color: tuple[int, int, int], amount: int = 70) -> tuple[int, int, int]:
+        return tuple(min(255, channel + amount) for channel in color)
 
-    def _draw_top_hud(self, screen: pygame.Surface) -> None:
-        """Draw both player name cards and the shared green race timer."""
-        width = screen.get_width()
-        timer = self.timer_font.render(self._format_time(self._elapsed_ms()), True, (120, 255, 120))
-        timer_rect = pygame.Rect(0, 0, timer.get_width() + 28, timer.get_height() + 14)
-        timer_rect.midtop = (width // 2, 12)
-        timer_card = pygame.Surface(timer_rect.size, pygame.SRCALPHA)
-        pygame.draw.rect(timer_card, (8, 12, 10, 220), timer_card.get_rect(), border_radius=8)
-        screen.blit(timer_card, timer_rect)
-        screen.blit(timer, timer.get_rect(center=timer_rect.center))
+    def _draw_solver_panel(
+        self,
+        target: pygame.Surface,
+        panel_x: int,
+        panel_width: int,
+        panel_height: int,
+        run: Any,
+    ) -> None:
+        """Render one algorithm and its own scaled maze/search layer."""
+        panel = pygame.Surface((panel_width, panel_height))
+        panel.fill((17, 23, 35))
+        accent = run.color
+        panel_rect = panel.get_rect()
+        pygame.draw.rect(panel, accent, panel_rect, width=2)
 
-        accents = ((72, 218, 255), (255, 184, 86))
-        screen_margin = 16
-        card_height = 56
-        portrait_size = 40
-        gap = 9
-        max_card_width = max(112, (width - timer_rect.width - 48) // 2)
+        pad = 12
+        header = pygame.Rect(pad, pad, max(1, panel_width - pad * 2), 98)
+        pygame.draw.rect(panel, (31, 41, 59), header, border_radius=12)
+        pygame.draw.rect(panel, accent, header, width=2, border_radius=12)
 
-        for index, right_aligned in ((0, False), (1, True)):
-            name = self._fit_hud_name(
-                self.fonts.medium,
-                self.player_names[index],
-                accents[index],
-                max(20, max_card_width - 20 - portrait_size - gap),
-            )
-            card_width = min(
-                max_card_width,
-                name.get_width() + 20 + portrait_size + gap,
-            )
-            card = pygame.Surface((card_width, card_height), pygame.SRCALPHA)
-            pygame.draw.rect(card, (9, 14, 24, 222), card.get_rect(), border_radius=9)
-            pygame.draw.rect(card, (*accents[index], 150), card.get_rect(), 1, border_radius=9)
-            portrait = self._idle_portrait(index, portrait_size)
+        title = self.panel_title_font.render(run.name, True, accent)
+        panel.blit(title, (header.x + 12, header.y + 7))
 
-            if right_aligned:
-                portrait_rect = portrait.get_rect(midright=(card_width - 8, card_height // 2))
-                name_rect = name.get_rect(
-                    midright=(portrait_rect.left - gap, card_height // 2)
-                )
-                card_x = width - screen_margin - card_width
-            else:
-                portrait_rect = portrait.get_rect(midleft=(8, card_height // 2))
-                name_rect = name.get_rect(
-                    midleft=(portrait_rect.right + gap, card_height // 2)
-                )
-                card_x = screen_margin
+        if run.rank is not None:
+            rank_label = f"TOP {run.rank}"
+            rank_fill = accent
+        elif run.finished:
+            rank_label = "NO PATH"
+            rank_fill = (78, 88, 105)
+        else:
+            rank_label = "RUNNING"
+            rank_fill = (47, 66, 91)
+        badge_text = self.panel_metric_font.render(rank_label, True, (15, 22, 32))
+        badge = pygame.Rect(0, 0, badge_text.get_width() + 18, 26)
+        badge.topright = (header.right - 10, header.y + 10)
+        pygame.draw.rect(panel, rank_fill, badge, border_radius=10)
+        panel.blit(badge_text, badge_text.get_rect(center=badge.center))
 
-            card.blit(portrait, portrait_rect)
-            card.blit(name, name_rect)
-            screen.blit(card, (card_x, 12))
-
-    def draw(self) -> None:
-        screen = self.screen
-        screen.fill(config.COLOR_BG)
-        rows, cols = self.maze.rows, self.maze.cols
-        cell = max(1, min(self.cell_size, screen.get_width() // cols, screen.get_height() // rows))
-        offset_x = (screen.get_width() - cols * cell) // 2
-        offset_y = (screen.get_height() - rows * cell) // 2
-        screen.blit(self._scaled_map(cell, rows, cols), (offset_x, offset_y))
-
-        finish = pygame.transform.scale(self.finish_tile, (cell, cell))
-        goal_row, goal_col = self.maze.goal
-        screen.blit(finish, (offset_x + goal_col * cell, offset_y + goal_row * cell))
-
-        players_near_each_other = (
-            abs(self.players[0].x - self.players[1].x) < self.cell_size
-            and abs(self.players[0].y - self.players[1].y) < self.cell_size
+        path_steps = "—"
+        if run.final_path is not None:
+            path_steps = str(max(0, len(run.final_path) - 1))
+        nodes_text = self.panel_metric_font.render(
+            f"Nodes explored: {run.nodes_explored:,}", True, (231, 238, 247)
         )
-        for player_index, player in enumerate(self.players):
-            # Player coordinates use the base CELL_SIZE; scale positions and
-            # sprite dimensions together so large mazes remain legible.
-            scale = cell / self.cell_size
-            player.draw(
-                screen,
-                offset_x - player.x * (1 - scale),
-                offset_y - player.y * (1 - scale),
-                visual_scale=scale,
-            )
-            sprite = getattr(player, "image", None)
-            sprite_height = sprite.get_height() if sprite is not None else player.visual_size
-            center = (
-                round(offset_x + player.x * scale),
-                round(offset_y + player.y * scale),
-            )
-            name_surface = self.fonts.small.render(
-                self.player_names[player_index],
-                True,
-                (250, 250, 255),
-            )
-            badge = pygame.Surface(
-                (name_surface.get_width() + 14, name_surface.get_height() + 8),
-                pygame.SRCALPHA,
-            )
-            pygame.draw.rect(badge, (12, 18, 27, 210), badge.get_rect(), border_radius=6)
-            badge.blit(name_surface, (7, 4))
-            badge_y = center[1] - round(sprite_height * scale) // 2 - 4
-            if players_near_each_other:
-                if player_index == 0:
-                    badge_rect = badge.get_rect(bottomright=(center[0] - 5, badge_y))
-                else:
-                    badge_rect = badge.get_rect(bottomleft=(center[0] + 5, badge_y))
-            else:
-                badge_rect = badge.get_rect(midbottom=(center[0], badge_y))
-            # At the maze's top edge, put the avatar label below the sprite so
-            # it stays clear of the fixed HUD cards and timer.
-            if badge_rect.top < 72:
-                label_y = center[1] + round(sprite_height * scale) // 2 + 4
-                if players_near_each_other and player_index == 0:
-                    badge_rect = badge.get_rect(topright=(center[0] - 5, label_y))
-                elif players_near_each_other:
-                    badge_rect = badge.get_rect(topleft=(center[0] + 5, label_y))
-                else:
-                    badge_rect = badge.get_rect(midtop=(center[0], label_y))
-            badge_rect.clamp_ip(screen.get_rect())
-            screen.blit(badge, badge_rect)
+        path_text = self.panel_metric_font.render(
+            f"Path steps: {path_steps}", True, (177, 192, 210)
+        )
+        panel.blit(nodes_text, (header.x + 12, header.y + 48))
+        panel.blit(path_text, (header.x + 12, header.y + 72))
 
-        self._draw_top_hud(screen)
+        rows = len(self.maze.grid)
+        cols = max((len(row) for row in self.maze.grid), default=0)
+        footer_height = 44
+        grid_top = header.bottom + 12
+        grid_bottom = panel_height - footer_height - 12
+        available_width = max(1, panel_width - pad * 2)
+        available_height = max(1, grid_bottom - grid_top)
+        mini_cell_size = max(
+            1,
+            min(available_width // max(1, cols), available_height // max(1, rows)),
+        )
+        grid_width = cols * mini_cell_size
+        grid_height = rows * mini_cell_size
+        grid_x = (panel_width - grid_width) // 2
+        grid_y = grid_top + (available_height - grid_height) // 2
 
-        if self.state == "victory" and self.winner_index is not None:
-            overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
-            overlay.fill((0, 0, 0, 165))
-            screen.blit(overlay, (0, 0))
-            panel_rect = self.victory_panel.get_rect(center=screen.get_rect().center)
-            screen.blit(self.victory_panel, panel_rect)
-            winner = self.player_names[self.winner_index]
-            winner_text = self.victory_font.render(f"{winner} WINS!", True, (255, 220, 90))
-            time_text = self.fonts.medium.render(
-                f"Completion Time: {self._format_time(self._elapsed_ms())}",
-                True,
-                (240, 245, 250),
-            )
-            screen.blit(winner_text, winner_text.get_rect(center=(panel_rect.centerx, panel_rect.centery - 55)))
-            screen.blit(time_text, time_text.get_rect(center=(panel_rect.centerx, panel_rect.centery + 5)))
-            hover = self.back_button.collidepoint(pygame.mouse.get_pos())
-            fill = (54, 112, 142) if hover else (38, 80, 108)
-            pygame.draw.rect(screen, fill, self.back_button, border_radius=10)
-            pygame.draw.rect(screen, (100, 225, 240), self.back_button, width=2, border_radius=10)
-            back_text = self.fonts.medium.render("Return to Menu", True, (255, 255, 255))
-            screen.blit(back_text, back_text.get_rect(center=self.back_button.center))
-            hint = self.fonts.small.render("Press ENTER or ESC to return", True, (185, 195, 208))
-            screen.blit(hint, hint.get_rect(center=(screen.get_width() // 2, screen.get_height() - 18)))
+        panel.blit(
+            self._get_maze_layer(mini_cell_size, rows, cols),
+            (grid_x, grid_y),
+        )
+        _, _, finish_icon = self._get_tile_variants(mini_cell_size)
+        goal_row, goal_col = self.maze.goal
+        panel.blit(
+            finish_icon,
+            (grid_x + goal_col * mini_cell_size, grid_y + goal_row * mini_cell_size),
+        )
+
+        search_layer = pygame.Surface((grid_width, grid_height), pygame.SRCALPHA)
+        latest = run.latest
+        if latest is not None:
+            visited_size = max(1, round(mini_cell_size * 0.8))
+            visited_inset = (mini_cell_size - visited_size) // 2
+            for row, col in latest.visited:
+                if 0 <= row < rows and 0 <= col < cols:
+                    pygame.draw.rect(
+                        search_layer,
+                        (*accent, 88),
+                        (
+                            col * mini_cell_size + visited_inset,
+                            row * mini_cell_size + visited_inset,
+                            visited_size,
+                            visited_size,
+                        ),
+                    )
+
+            frontier_size = max(1, round(mini_cell_size * 0.84))
+            frontier_inset = (mini_cell_size - frontier_size) // 2
+            frontier_color = self._brighten(accent, 55)
+            for row, col in latest.frontier:
+                if 0 <= row < rows and 0 <= col < cols:
+                    pygame.draw.rect(
+                        search_layer,
+                        (*frontier_color, 235),
+                        (
+                            col * mini_cell_size + frontier_inset,
+                            row * mini_cell_size + frontier_inset,
+                            frontier_size,
+                            frontier_size,
+                        ),
+                        width=max(1, mini_cell_size // 4),
+                    )
+
+        if run.final_path:
+            path_points = [
+                (
+                    round((col + 0.5) * mini_cell_size),
+                    round((row + 0.5) * mini_cell_size),
+                )
+                for row, col in run.final_path
+                if 0 <= row < rows and 0 <= col < cols
+            ]
+            if len(path_points) >= 2:
+                pygame.draw.lines(
+                    search_layer,
+                    (*self._brighten(accent, 95), 245),
+                    False,
+                    path_points,
+                    width=max(2, mini_cell_size // 2),
+                )
+            for point in path_points:
+                pygame.draw.circle(
+                    search_layer,
+                    self._brighten(accent, 95),
+                    point,
+                    max(1, mini_cell_size // 4),
+                )
+
+        if run.current_pos is not None:
+            head_row, head_col = run.current_pos
+            if 0 <= head_row < rows and 0 <= head_col < cols:
+                head_center = (
+                    round((head_col + 0.5) * mini_cell_size),
+                    round((head_row + 0.5) * mini_cell_size),
+                )
+                pygame.draw.circle(
+                    search_layer,
+                    (255, 255, 255),
+                    head_center,
+                    max(2, round(mini_cell_size * 0.3)),
+                )
+                pygame.draw.circle(
+                    search_layer,
+                    accent,
+                    head_center,
+                    max(2, round(mini_cell_size * 0.3)),
+                    width=1,
+                )
+
+        panel.blit(search_layer, (grid_x, grid_y))
+        target.blit(panel, (panel_x, 0))
+
+    def _draw_auto_solve_split_view(self, target: pygame.Surface) -> None:
+        """Show BFS, DFS and A* in independent, equally sized maze panels."""
+        target.fill((13, 18, 29))
+        width, height = target.get_size()
+        footer_height = 42
+        panel_height = max(1, height - footer_height)
+        base_width = width // 3
+
+        for index, run in enumerate(self.solver_runs[:3]):
+            panel_x = index * base_width
+            panel_width = base_width if index < 2 else width - panel_x
+            self._draw_solver_panel(target, panel_x, panel_width, panel_height, run)
+
+        for divider_x in (base_width, base_width * 2):
+            pygame.draw.line(target, (67, 82, 104), (divider_x, 0), (divider_x, panel_height), 2)
+
+        footer = pygame.Rect(0, panel_height, width, footer_height)
+        pygame.draw.rect(target, (22, 29, 43), footer)
+        pygame.draw.line(target, (60, 77, 101), footer.topleft, footer.topright, 1)
+        instruction = self.hud_font.render(
+            "Press 'F' to Resume Play | ESC for Menu",
+            True,
+            (225, 235, 246),
+        )
+        target.blit(instruction, instruction.get_rect(center=footer.center))
+
+
+
+
+
+def __getattr__(name: str) -> Any:
+    if name == "TwoPlayerScreen":
+        from play import TwoPlayerScreen
+        return TwoPlayerScreen
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def main() -> None:

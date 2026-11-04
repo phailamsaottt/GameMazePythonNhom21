@@ -88,8 +88,8 @@ class Player(pygame.sprite.Sprite):
 		spawn_offset: tuple[float, float] = (0.0, 0.0),
 	) -> None:
 		super().__init__()
-		if controls not in ("wasd", "arrows"):
-			raise ValueError("controls must be 'wasd' or 'arrows'")
+		if controls not in ("wasd", "arrows", "both"):
+			raise ValueError("controls must be 'wasd', 'arrows', or 'both'")
 		if character_id not in (1, 2):
 			raise ValueError("character_id must be 1 or 2")
 		self.controls = controls
@@ -97,12 +97,12 @@ class Player(pygame.sprite.Sprite):
 		self.use_gif = bool(character_id == 2 and gif_pygame is not None)
 		self.spawn_offset = (float(spawn_offset[0]), float(spawn_offset[1]))
 		self.speed = float(speed)
-		# Keep the sprite close to a full maze tile while using a smaller AABB
+	
 		# for collision checks, so the larger art does not snag on wall corners.
 		default_visual_scale = 1.6 if character_id == 2 else 0.95
 		self.visual_size = max(1, int(player_size or CELL_SIZE * default_visual_scale))
 		self.hitbox_size = max(1, int(CELL_SIZE * 0.65))
-		# Compatibility for callers that still inspect the old attribute.
+	
 		self.player_size = self.visual_size
 
 		# Tọa độ và hướng
@@ -268,11 +268,16 @@ class Player(pygame.sprite.Sprite):
 			is_right = bool(keys[pygame.K_d])
 			is_up = bool(keys[pygame.K_w])
 			is_down = bool(keys[pygame.K_s])
-		else:
+		elif self.controls == "arrows":
 			is_left = bool(keys[pygame.K_LEFT])
 			is_right = bool(keys[pygame.K_RIGHT])
 			is_up = bool(keys[pygame.K_UP])
 			is_down = bool(keys[pygame.K_DOWN])
+		else:
+			is_left = bool(keys[pygame.K_a] or keys[pygame.K_LEFT])
+			is_right = bool(keys[pygame.K_d] or keys[pygame.K_RIGHT])
+			is_up = bool(keys[pygame.K_w] or keys[pygame.K_UP])
+			is_down = bool(keys[pygame.K_s] or keys[pygame.K_DOWN])
 
 		# Xử lý di chuyển ngang & hướng mặt
 		if is_left and not is_right:
